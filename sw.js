@@ -1,9 +1,8 @@
-const SHELL = 'route-shell-v6', TILES = 'route-tiles-v2';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png',
-  './leaflet.css', './leaflet.js'];
+const SHELL = 'mm-shell-v7', TILES = 'route-tiles-v2';
+const ASSETS = ['./', './index.html', './app.js', './app.css', './manifest.webmanifest', './icon-180.png', './icon-512.png', './leaflet.css', './leaflet.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => Promise.all(ASSETS.map(a => c.add(a).catch(() => {})))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== SHELL && k !== TILES).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
-const isTile = u => /basemaps\.cartocdn\.com|tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname);
+const isTile = u => /tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname);
 let puts = 0;
 async function trim(){ const c = await caches.open(TILES); const k = await c.keys(); for (let i = 0; i < k.length - 4000; i++) await c.delete(k[i]); }
 self.addEventListener('fetch', e => {
@@ -20,4 +19,17 @@ self.addEventListener('fetch', e => {
   } else if (url.origin === location.origin && !url.pathname.includes('/api/')) {
     e.respondWith(fetch(req).then(r => { const cl = r.clone(); caches.open(SHELL).then(c => c.put(req, cl)); return r; }).catch(() => caches.match(req).then(h => h || caches.match('./index.html'))));
   }
+});
+/* push-уведомления */
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (err) { d = {title: 'Mercury Map', body: e.data && e.data.text()}; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Mercury Map', {body: d.body || '', tag: d.tag, icon: 'icon-180.png', badge: 'icon-180.png', data: {url: d.url || '/'}}));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || '/', self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
+    for (const c of list) { if ('focus' in c) { c.navigate(url).catch(() => {}); return c.focus(); } }
+    return self.clients.openWindow(url);
+  }));
 });

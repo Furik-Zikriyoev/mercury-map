@@ -1,0 +1,9 @@
+{
+  "name": "mercury-map",
+  "private": true,
+  "description": "Mercury Map — полевые продажи: маршруты, партнёры, контроль руководителя",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

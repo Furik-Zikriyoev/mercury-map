@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Маршрут партнёров</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Маршрут">
+<meta name="theme-color" content="#0d0f17">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#0d0f17; --glass:rgba(20,22,33,.78); --glass-2:rgba(32,35,50,.92);
+  --line:rgba(255,255,255,.09); --text:#f4f5fb; --muted:#9aa0b8; --accent:#7c6cff; --accent-2:#22d3ee;
+  --red:#ff4d5e; --amber:#ffb020; --blue:#4c8dff; --green:#2fd07a;
+  --r:20px; --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,textarea{font:inherit;color:var(--text)}
+#map{position:fixed;inset:0;background:#dfe3ea}
+.leaflet-container{font:inherit}
+.leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.6)!important;margin-bottom:calc(var(--safe-b) + 92px)!important}
+.leaflet-control-zoom{display:none}
+body.mode-pen #map,body.mode-pen .leaflet-interactive{cursor:crosshair!important}
+body.mode-pin #map{cursor:copy}
+body.mode-eraser .leaflet-interactive{cursor:not-allowed!important}
+
+.glass{background:var(--glass);backdrop-filter:blur(22px) saturate(1.6);-webkit-backdrop-filter:blur(22px) saturate(1.6);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
+
+/* top bar */
+.topbar{position:fixed;z-index:500;top:calc(var(--safe-t) + 10px);left:12px;right:12px;display:flex;gap:8px;align-items:center}
+.datepill{display:flex;align-items:center;border-radius:18px;padding:4px;min-width:0;flex:1}
+.datepill .arrow{width:38px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none}
+.datepill .arrow:active{background:rgba(255,255,255,.08)}
+.datepill .label{flex:1;min-width:0;text-align:center;padding:2px 4px}
+.datepill .label b{display:block;font-size:16px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.datepill .label small{display:block;color:var(--muted);font-size:12px;margin-top:1px;white-space:nowrap}
+.datepill .label small .km{color:var(--accent-2);font-weight:600}
+.iconbtn{width:52px;height:52px;border-radius:18px;display:grid;place-items:center;flex:none;position:relative}
+.iconbtn:active{transform:scale(.95)}
+.iconbtn.on{background:linear-gradient(135deg,var(--accent),#5b4bff);border-color:transparent}
+.badge{position:absolute;top:6px;right:6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);font-size:11px;font-weight:700;display:grid;place-items:center}
+
+/* dock */
+.dock{position:fixed;z-index:500;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-b) + 12px);display:flex;align-items:center;gap:2px;padding:6px;border-radius:26px;max-width:calc(100% - 20px)}
+.tool{width:56px;height:58px;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#c9cde0;transition:background .2s,color .2s,transform .12s}
+.tool span{font-size:10px;font-weight:600;letter-spacing:.1px}
+.tool:active{transform:scale(.93)}
+.tool.active{color:#fff;background:linear-gradient(140deg,var(--accent),#5b4bff);box-shadow:0 6px 18px rgba(124,108,255,.45)}
+.tool.active.t-eraser{background:linear-gradient(140deg,#ff5e7a,#ff3b3b);box-shadow:0 6px 18px rgba(255,77,94,.4)}
+.tool.active.t-pin{background:linear-gradient(140deg,#14c1a6,#0e8fd6);box-shadow:0 6px 18px rgba(20,193,166,.4)}
+.sep{width:1px;height:34px;background:var(--line);margin:0 4px}
+
+.palette{position:fixed;z-index:500;left:50%;transform:translate(-50%,10px);bottom:calc(var(--safe-b) + 86px);display:flex;gap:10px;padding:10px 14px;border-radius:22px;opacity:0;pointer-events:none;transition:.25s}
+.palette.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.swatch{width:30px;height:30px;border-radius:50%;background:var(--c);border:3px solid transparent;box-shadow:0 0 0 1px rgba(255,255,255,.15)}
+.swatch.sel{border-color:#fff}
+.palette .w{width:1px;background:var(--line)}
+.wbtn{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#c9cde0}
+.wbtn.sel{background:rgba(255,255,255,.14);color:#fff}
+
+.toast{position:fixed;z-index:700;left:50%;top:calc(var(--safe-t) + 74px);transform:translate(-50%,-8px);padding:10px 16px;border-radius:16px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* pins */
+.pin{width:34px;height:44px;position:relative;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35))}
+.pin svg{position:absolute;inset:0}
+.pin i{position:absolute;left:50%;top:15px;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#fff}
+.pin.ghost{opacity:.7;animation:bob 1s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-5px)}}
+.pin-label{background:rgba(13,15,23,.82)!important;color:#fff!important;border:0!important;border-radius:8px!important;padding:2px 7px!important;font-size:11px!important;font-weight:600;box-shadow:none!important;white-space:nowrap}
+.pin-label:before{display:none}
+.lowzoom .pin-label{display:none}
+.me-dot{width:18px;height:18px;border-radius:50%;background:#1a8cff;border:3px solid #fff;box-shadow:0 0 0 8px rgba(26,140,255,.25)}
+
+/* sheet */
+.backdrop{position:fixed;inset:0;z-index:800;background:rgba(5,6,10,.35);opacity:0;pointer-events:none;transition:.25s}
+.backdrop.show{opacity:1;pointer-events:auto}
+.sheet{position:fixed;z-index:801;left:0;right:0;bottom:0;max-height:86vh;display:flex;flex-direction:column;border-radius:26px 26px 0 0;background:var(--glass-2);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border:1px solid var(--line);border-bottom:0;transform:translateY(105%);transition:transform .32s cubic-bezier(.2,.9,.25,1);padding-bottom:var(--safe-b)}
+.sheet.open{transform:none}
+@media(min-width:620px){.sheet{left:50%;width:520px;margin-left:-260px}}
+.grab{width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.22);margin:9px auto 2px;flex:none}
+.sheet-body{overflow:auto;padding:8px 18px 18px;-webkit-overflow-scrolling:touch}
+.sheet h2{margin:6px 0 4px;font-size:22px;letter-spacing:-.4px}
+.sheet h3{margin:18px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600}
+.sub{color:var(--muted);font-size:13px}
+.field{display:block;margin-top:12px}
+.field label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px 4px}
+.field input,.field textarea{width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05);outline:none;font-size:16px}
+.field input:focus,.field textarea:focus{border-color:var(--accent);background:rgba(124,108,255,.08)}
+.field textarea{min-height:70px;resize:none}
+.statuses{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.st{display:flex;align-items:center;gap:10px;padding:12px;border-radius:16px;border:1.5px solid var(--line);background:rgba(255,255,255,.03);text-align:left;font-size:13px;line-height:1.2;transition:.15s}
+.st .dot{width:14px;height:14px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 22%,transparent)}
+.st.sel{border-color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+.row{display:flex;gap:10px;margin-top:18px}
+.btn{flex:1;height:50px;border-radius:16px;font-weight:650;background:rgba(255,255,255,.08)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),#5b4bff);box-shadow:0 8px 22px rgba(124,108,255,.35)}
+.btn.danger{color:#ff7584;background:rgba(255,77,94,.12)}
+.btn:active{transform:scale(.98)}
+.btn.sm{height:42px;font-size:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:650;background:color-mix(in srgb,var(--c) 18%,transparent);color:color-mix(in srgb,var(--c) 70%,#fff)}
+.chip:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}
+.kv{margin-top:14px;display:grid;gap:10px}
+.kv div{padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.04)}
+.kv small{display:block;color:var(--muted);font-size:11px;margin-bottom:3px}
+.kv a{color:var(--accent-2);text-decoration:none}
+.timeline{margin:6px 0 0;padding:0;list-style:none}
+.timeline li{display:flex;gap:10px;align-items:center;padding:6px 0;font-size:13px;color:var(--muted)}
+.timeline li .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
+.timeline li b{color:var(--text);font-weight:600}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.stat{padding:10px 6px;border-radius:16px;background:rgba(255,255,255,.04);border:1.5px solid transparent;text-align:center}
+.stat b{display:block;font-size:22px;color:var(--c)}
+.stat small{font-size:10px;color:var(--muted);line-height:1.15;display:block}
+.stat.sel{border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+.search{margin-top:12px;width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05);outline:none;font-size:16px}
+.list{margin-top:8px}
+.item{display:flex;align-items:center;gap:12px;width:100%;padding:12px 4px;border-bottom:1px solid var(--line);text-align:left}
+.item:last-child{border-bottom:0}
+.item .dot{width:12px;height:12px;border-radius:50%;background:var(--c);flex:none}
+.item .t{flex:1;min-width:0}
+.item .t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .t small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .d{font-size:12px;color:var(--muted);flex:none;text-align:right}
+.empty{text-align:center;color:var(--muted);padding:30px 10px;font-size:14px}
+
+.seg{display:flex;padding:4px;border-radius:14px;background:rgba(255,255,255,.06);margin-top:6px}
+.seg button{flex:1;height:38px;border-radius:11px;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button.sel{background:rgba(255,255,255,.14);color:#fff}
+.styles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+.style{border-radius:14px;overflow:hidden;border:2px solid transparent;background:rgba(255,255,255,.05);padding:0 0 6px;font-size:11px;font-weight:600;color:var(--muted)}
+.style img{display:block;width:100%;aspect-ratio:1;object-fit:cover;margin-bottom:5px;background:#333}
+.style.sel{border-color:var(--accent);color:#fff}
+.days .item .d b{display:block;color:var(--accent-2);font-size:14px}
+input[type=date].native{width:100%;height:48px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.05);padding:0 14px;font-size:16px;color-scheme:dark}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="topbar">
+  <div class="datepill glass">
+    <button class="arrow" id="prevDay" aria-label="Предыдущий день"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="label" id="dateLabel"><b id="dateTitle">Сегодня</b><small id="dateSub">0 км</small></button>
+    <button class="arrow" id="nextDay" aria-label="Следующий день"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <button class="iconbtn glass" id="listBtn" aria-label="Партнёры"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="badge" id="pCount">0</span></button>
+  <button class="iconbtn glass" id="layersBtn" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg></button>
+</div>
+
+<div class="palette glass" id="palette"></div>
+
+<div class="dock glass">
+  <button class="tool active" data-mode="hand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg><span>Карта</span></button>
+  <button class="tool" data-mode="pen"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg><span>Маршрут</span></button>
+  <button class="tool t-pin" data-mode="pin"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><path d="M12 7v6M9 10h6"/></svg><span>Метка</span></button>
+  <button class="tool t-eraser" data-mode="eraser"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l9.6-9.6a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 21"/><path d="M22 21H7M5 11l9 9"/></svg><span>Ластик</span></button>
+  <div class="sep"></div>
+  <button class="tool" id="undoBtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span>Назад</span></button>
+  <button class="tool" id="locateBtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 22 2l-9 19-2-8-8-2z"/></svg><span>Я</span></button>
+</div>
+
+<div class="toast glass" id="toast"></div>
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet"><div class="grab"></div><div class="sheet-body" id="sheetBody"></div></div>
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+'use strict';
+/* ---------- constants ---------- */
+const STATUSES = {
+  refused:   {label:'Отказался',               short:'Отказ',     color:'#ff4d5e'},
+  contacts:  {label:'Взял контакты, жду ответа', short:'Жду ответа', color:'#ffb020'},
+  agreed:    {label:'Согласился, жду документы', short:'Жду доки',  color:'#4c8dff'},
+  connected: {label:'Подключён',                short:'Подключён', color:'#2fd07a'}
+};
+const ST_ORDER = ['refused','contacts','agreed','connected'];
+const PEN_COLORS = ['#7c6cff','#ff3b7f','#00b8a9','#ff8a00','#1f2937'];
+const WEIGHTS = [4,6,9];
+const STYLES = {
+  voyager:{name:'Улицы', url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', sub:'abcd', max:20, attr:'© OpenStreetMap, © CARTO'},
+  osm:{name:'OSM', url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub:'', max:19, attr:'© OpenStreetMap'},
+  sat:{name:'Спутник', url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', sub:'', max:19, attr:'© Esri'},
+  dark:{name:'Ночь', url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', sub:'abcd', max:20, attr:'© OpenStreetMap, © CARTO'}
+};
+const TASHKENT = [41.3111, 69.2797];
+const KEY = 'tashkent-route-v1';
+
+/* ---------- storage ---------- */
+const store = {
+  load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){ return null; } },
+  save(){ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){ toast('Не удалось сохранить'); } }
+};
+const db = Object.assign({strokes:[], partners:[], settings:{}}, store.load() || {});
+db.settings = Object.assign({style:'voyager', color:PEN_COLORS[0], weight:6, scope:'all', view:null}, db.settings);
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dayKey = d => { const x = new Date(d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
+const parseDay = k => { const [y,m,d] = k.split('-').map(Number); return new Date(y, m-1, d); };
+const shiftDay = (k, n) => { const d = parseDay(k); d.setDate(d.getDate()+n); return dayKey(d); };
+const today = () => dayKey(Date.now());
+const fmtDay = k => {
+  if (k === today()) return 'Сегодня';
+  if (k === shiftDay(today(), -1)) return 'Вчера';
+  const s = new Intl.DateTimeFormat('ru-RU',{weekday:'short', day:'numeric', month:'long'}).format(parseDay(k));
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+const fmtShort = k => new Intl.DateTimeFormat('ru-RU',{day:'numeric', month:'short'}).format(parseDay(k));
+const fmtTime = ts => new Intl.DateTimeFormat('ru-RU',{day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}).format(new Date(ts));
+const fmtKm = m => m < 1000 ? Math.round(m)+' м' : (m/1000).toFixed(m < 10000 ? 2 : 1).replace('.', ',')+' км';
+const strokeLen = s => { let d = 0; for (let i=1;i<s.pts.length;i++) d += map.distance(s.pts[i-1], s.pts[i]); return d; };
+const dayLen = k => db.strokes.filter(s => s.day === k).reduce((a,s) => a + strokeLen(s), 0);
+
+let toastT;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
+
+/* ---------- state ---------- */
+let mode = 'hand';
+let day = today();
+let allDays = false;
+
+/* ---------- map ---------- */
+const map = L.map('map', {zoomControl:false, attributionControl:true, preferCanvas:false, tap:false, zoomSnap:.25, wheelPxPerZoomLevel:90});
+const v = db.settings.view;
+map.setView(v ? [v[0], v[1]] : TASHKENT, v ? v[2] : 13);
+map.attributionControl.setPrefix(false);
+let tiles;
+function setStyle(key){
+  const s = STYLES[key] || STYLES.voyager;
+  if (tiles) map.removeLayer(tiles);
+  tiles = L.tileLayer(s.url, {subdomains: s.sub || 'abc', maxZoom: 20, maxNativeZoom: s.max, attribution: s.attr, detectRetina: false}).addTo(map);
+  db.settings.style = key; store.save();
+}
+setStyle(db.settings.style);
+
+const renderer = L.canvas({padding:.5, tolerance:12});
+const routeLayer = L.layerGroup().addTo(map);
+const pinLayer = L.layerGroup().addTo(map);
+let meMarker = null;
+
+map.on('moveend', () => { const c = map.getCenter(); db.settings.view = [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]; store.save(); });
+const zoomCls = () => map.getContainer().classList.toggle('lowzoom', map.getZoom() < 15.5);
+map.on('zoomend', zoomCls); zoomCls();
+
+/* ---------- render ---------- */
+function pinIcon(color, ghost){
+  return L.divIcon({className:'', iconSize:[34,44], iconAnchor:[17,42], popupAnchor:[0,-40],
+    html:`<div class="pin${ghost?' ghost':''}"><svg viewBox="0 0 34 44" width="34" height="44"><path d="M17 1C8.2 1 1 8 1 16.6 1 28 17 43 17 43s16-15 16-26.4C33 8 25.8 1 17 1z" fill="${color}" stroke="#fff" stroke-width="2"/></svg><i></i></div>`});
+}
+
+function render(){
+  routeLayer.clearLayers(); pinLayer.clearLayers();
+  const strokes = allDays ? db.strokes : db.strokes.filter(s => s.day === day);
+  strokes.forEach(s => {
+    const op = allDays && s.day !== day ? .6 : 1;
+    L.polyline(s.pts, {renderer, color:'#fff', weight:s.w+4, opacity:.85*op, lineCap:'round', lineJoin:'round', interactive:false}).addTo(routeLayer);
+    const line = L.polyline(s.pts, {renderer, color:s.c, weight:s.w, opacity:op, lineCap:'round', lineJoin:'round'}).addTo(routeLayer);
+    line.on('click', e => {
+      if (mode === 'eraser'){ L.DomEvent.stop(e); db.strokes = db.strokes.filter(x => x.id !== s.id); store.save(); render(); toast('Линия удалена'); }
+      else if (mode === 'hand'){ toast(fmtDay(s.day)+' · '+fmtKm(strokeLen(s))); }
+    });
+  });
+  const pins = (db.settings.scope === 'day' && !allDays) ? db.partners.filter(p => p.day === day) : db.partners;
+  pins.forEach(p => {
+    const m = L.marker([p.lat, p.lng], {icon: pinIcon(STATUSES[p.status].color)}).addTo(pinLayer);
+    m.bindTooltip(esc(p.name), {permanent:true, direction:'bottom', offset:[0,2], className:'pin-label'});
+    m.on('click', e => { L.DomEvent.stop(e); if (mode === 'pen') return; openPartner(p.id); });
+  });
+  updateHeader();
+}
+
+function updateHeader(){
+  $('#dateTitle').textContent = allDays ? 'Все дни' : fmtDay(day);
+  const len = allDays ? db.strokes.reduce((a,s) => a + strokeLen(s), 0) : dayLen(day);
+  const np = allDays ? db.partners.length : db.partners.filter(p => p.day === day).length;
+  $('#dateSub').innerHTML = `<span class="km">${fmtKm(len)}</span> · ${np} ${plural(np,'метка','метки','меток')}${allDays ? '' : ' за день'}`;
+  $('#pCount').textContent = db.partners.length;
+  $('#pCount').style.display = db.partners.length ? '' : 'none';
+  $('#nextDay').style.opacity = (!allDays && day >= today()) ? .3 : 1;
+}
+const plural = (n, a, b, c) => { const m10 = n%10, m100 = n%100; return m10===1&&m100!==11 ? a : (m10>=2&&m10<=4&&(m100<10||m100>=20) ? b : c); };
+
+/* ---------- modes ---------- */
+function setMode(m){
+  if (m === 'pen' && allDays){ allDays = false; day = today(); render(); toast('Рисуем на сегодня'); }
+  mode = m;
+  document.body.className = 'mode-' + m;
+  document.querySelectorAll('.tool[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  $('#palette').classList.toggle('show', m === 'pen');
+  if (m === 'pen'){ map.dragging.disable(); toast('Ведите пальцем по улицам · двумя пальцами — масштаб'); }
+  else map.dragging.enable();
+  if (m === 'pin') toast('Нажмите на место, где находится партнёр');
+  if (m === 'eraser') toast('Нажмите на линию, чтобы удалить её');
+}
+document.querySelectorAll('.tool[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+function renderPalette(){
+  const p = $('#palette');
+  p.innerHTML = PEN_COLORS.map(c => `<button class="swatch${c===db.settings.color?' sel':''}" style="--c:${c}" data-c="${c}"></button>`).join('')
+    + '<span class="w"></span>' + WEIGHTS.map(w => `<button class="wbtn${w===db.settings.weight?' sel':''}" data-w="${w}"><span style="display:block;width:${w+4}px;height:${w+4}px;border-radius:50%;background:currentColor"></span></button>`).join('');
+  p.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { db.settings.color = b.dataset.c; store.save(); renderPalette(); });
+  p.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { db.settings.weight = +b.dataset.w; store.save(); renderPalette(); });
+}
+renderPalette();
+
+/* ---------- freehand drawing ---------- */
+const el = map.getContainer();
+const pointers = new Map();
+let cur = null;
+const cpt = e => { const r = el.getBoundingClientRect(); return L.point(e.clientX - r.left, e.clientY - r.top); };
+function cancelStroke(){ if (cur){ routeLayer.removeLayer(cur.casing); routeLayer.removeLayer(cur.line); cur = null; } }
+el.addEventListener('pointerdown', e => {
+  pointers.set(e.pointerId, true);
+  if (mode !== 'pen') return;
+  if (pointers.size > 1){ cancelStroke(); map.dragging.disable(); return; }
+  if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
+  const p = cpt(e), ll = map.containerPointToLatLng(p);
+  const c = db.settings.color, w = db.settings.weight;
+  cur = { pts:[ll], last:p, c, w,
+    casing: L.polyline([ll], {renderer, color:'#fff', weight:w+4, opacity:.85, lineCap:'round', lineJoin:'round', interactive:false}).addTo(routeLayer),
+    line: L.polyline([ll], {renderer, color:c, weight:w, lineCap:'round', lineJoin:'round', interactive:false}).addTo(routeLayer) };
+}, true);
+el.addEventListener('pointermove', e => {
+  if (!cur || mode !== 'pen' || pointers.size > 1) return;
+  const p = cpt(e);
+  if (p.distanceTo(cur.last) < 3) return;
+  cur.last = p;
+  const ll = map.containerPointToLatLng(p);
+  cur.pts.push(ll); cur.line.addLatLng(ll); cur.casing.addLatLng(ll);
+}, true);
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  if (!cur) return;
+  const s = cur; cur = null;
+  routeLayer.removeLayer(s.casing); routeLayer.removeLayer(s.line);
+  if (s.pts.length < 2) return;
+  const layerPts = s.pts.map(ll => map.latLngToLayerPoint(ll));
+  const simp = L.LineUtil.simplify(layerPts, 1.2).map(pt => map.layerPointToLatLng(pt));
+  db.strokes.push({id:uid(), day, c:s.c, w:s.w, ts:Date.now(), pts: simp.map(ll => [+ll.lat.toFixed(6), +ll.lng.toFixed(6)])});
+  store.save(); render();
+}
+el.addEventListener('pointerup', endPointer, true);
+el.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); cancelStroke(); }, true);
+el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') endPointer(e); }, true);
+
+/* ---------- undo ---------- */
+$('#undoBtn').onclick = () => {
+  const mine = db.strokes.filter(s => s.day === (allDays ? today() : day));
+  if (!mine.length) return toast('Нечего отменять');
+  const last = mine.reduce((a,b) => a.ts > b.ts ? a : b);
+  db.strokes = db.strokes.filter(s => s.id !== last.id); store.save(); render(); toast('Последняя линия удалена');
+};
+
+/* ---------- locate ---------- */
+$('#locateBtn').onclick = () => {
+  if (!navigator.geolocation) return toast('Геолокация недоступна');
+  toast('Ищу вас…');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    if (meMarker) meMarker.setLatLng(ll);
+    else meMarker = L.marker(ll, {icon: L.divIcon({className:'', html:'<div class="me-dot"></div>', iconSize:[18,18], iconAnchor:[9,9]}), interactive:false}).addTo(map);
+    map.flyTo(ll, Math.max(map.getZoom(), 17), {duration:.8});
+  }, () => toast('Разрешите доступ к геопозиции'), {enableHighAccuracy:true, timeout:10000});
+};
+
+/* ---------- sheet ---------- */
+let ghost = null;
+function openSheet(html, mount){
+  $('#sheetBody').innerHTML = html; $('#sheetBody').scrollTop = 0;
+  $('#sheet').classList.add('open'); $('#backdrop').classList.add('show');
+  if (mount) mount($('#sheetBody'));
+}
+function closeSheet(){
+  $('#sheet').classList.remove('open'); $('#backdrop').classList.remove('show');
+  if (ghost){ map.removeLayer(ghost); ghost = null; }
+  document.activeElement && document.activeElement.blur && document.activeElement.blur();
+}
+$('#backdrop').onclick = closeSheet;
+// swipe down to close
+(() => { let y0 = null; const sh = $('#sheet');
+  sh.addEventListener('touchstart', e => { if ($('#sheetBody').scrollTop <= 0) y0 = e.touches[0].clientY; }, {passive:true});
+  sh.addEventListener('touchmove', e => { if (y0 === null) return; const dy = e.touches[0].clientY - y0; if (dy > 0) sh.style.transform = `translateY(${dy}px)`; }, {passive:true});
+  sh.addEventListener('touchend', e => { if (y0 === null) return; const dy = e.changedTouches[0].clientY - y0; sh.style.transform = ''; y0 = null; if (dy > 90) closeSheet(); });
+})();
+
+const statusPicker = sel => `<div class="statuses">${ST_ORDER.map(k => `<button type="button" class="st${k===sel?' sel':''}" data-st="${k}" style="--c:${STATUSES[k].color}"><span class="dot"></span>${STATUSES[k].label}</button>`).join('')}</div>`;
+
+/* add / edit partner */
+map.on('click', e => {
+  if (mode !== 'pin') return;
+  if (ghost) map.removeLayer(ghost);
+  ghost = L.marker(e.latlng, {icon: pinIcon('#7c6cff', true), interactive:false}).addTo(map);
+  partnerForm(null, e.latlng);
+});
+
+function partnerForm(id, latlng){
+  const p = id ? db.partners.find(x => x.id === id) : null;
+  let status = p ? p.status : 'contacts';
+  openSheet(`
+    <h2>${p ? 'Изменить партнёра' : 'Новый партнёр'}</h2>
+    <div class="sub">${p ? 'Добавлен '+fmtTime(p.ts) : fmtDay(allDays ? today() : day)}</div>
+    <div class="field"><label>Название партнёра *</label><input id="fName" maxlength="80" placeholder="Например, «Техно Маркет»" value="${esc(p?.name)}"></div>
+    <div class="field"><label>Что это — магазин чего / какие услуги</label><input id="fDesc" maxlength="120" placeholder="Бытовая техника, телефоны" value="${esc(p?.desc)}"></div>
+    <div class="field"><label>Контакт (телефон, Telegram, имя)</label><input id="fContact" maxlength="80" placeholder="+998 90 123 45 67 · Алишер" value="${esc(p?.contact)}"></div>
+    <div class="field"><label>Статус</label>${statusPicker(status)}</div>
+    <div class="field"><label>Заметка</label><textarea id="fNote" maxlength="500" placeholder="Что обсудили, когда перезвонить…">${esc(p?.note)}</textarea></div>
+    <div class="row"><button class="btn" id="fCancel">Отмена</button><button class="btn primary" id="fSave">Сохранить</button></div>
+  `, b => {
+    b.querySelectorAll('[data-st]').forEach(x => x.onclick = () => { status = x.dataset.st; b.querySelectorAll('[data-st]').forEach(y => y.classList.toggle('sel', y === x)); });
+    b.querySelector('#fCancel').onclick = closeSheet;
+    b.querySelector('#fSave').onclick = () => {
+      const name = b.querySelector('#fName').value.trim();
+      if (!name){ b.querySelector('#fName').focus(); return toast('Введите название'); }
+      const data = {name, desc:b.querySelector('#fDesc').value.trim(), contact:b.querySelector('#fContact').value.trim(), note:b.querySelector('#fNote').value.trim()};
+      if (p){
+        if (p.status !== status) p.history.push({s:status, ts:Date.now()});
+        Object.assign(p, data, {status});
+      } else {
+        db.partners.push(Object.assign({id:uid(), lat:+latlng.lat.toFixed(6), lng:+latlng.lng.toFixed(6), day: allDays ? today() : day, ts:Date.now(), status, history:[{s:status, ts:Date.now()}]}, data));
+        setMode('hand');
+      }
+      store.save(); closeSheet(); render(); toast(p ? 'Сохранено' : 'Метка добавлена');
+    };
+    if (!p) setTimeout(() => b.querySelector('#fName').focus(), 350);
+  });
+}
+
+function telLink(c){ const digits = c.replace(/[^\d+]/g,''); return digits.length >= 7 ? `<a href="tel:${esc(digits)}">${esc(c)}</a>` : esc(c); }
+
+function openPartner(id){
+  const p = db.partners.find(x => x.id === id); if (!p) return;
+  const st = STATUSES[p.status];
+  openSheet(`
+    <span class="chip" style="--c:${st.color}">${st.label}</span>
+    <h2 style="margin-top:10px">${esc(p.name)}</h2>
+    ${p.desc ? `<div class="sub">${esc(p.desc)}</div>` : ''}
+    <h3>Сменить статус</h3>
+    ${statusPicker(p.status)}
+    <div class="kv">
+      ${p.contact ? `<div><small>Контакт</small>${telLink(p.contact)}</div>` : ''}
+      ${p.note ? `<div><small>Заметка</small>${esc(p.note).replace(/\n/g,'<br>')}</div>` : ''}
+      <div><small>Добавлен</small>${fmtTime(p.ts)}</div>
+    </div>
+    <h3>История</h3>
+    <ul class="timeline">${p.history.slice().reverse().map(h => `<li><span class="dot" style="--c:${STATUSES[h.s].color}"></span><b>${STATUSES[h.s].short}</b> · ${fmtTime(h.ts)}</li>`).join('')}</ul>
+    <div class="row"><button class="btn danger" id="pDel">Удалить</button><button class="btn" id="pRoute">Открыть в картах</button><button class="btn primary" id="pEdit">Изменить</button></div>
+  `, b => {
+    b.querySelectorAll('[data-st]').forEach(x => x.onclick = () => {
+      if (x.dataset.st === p.status) return;
+      p.status = x.dataset.st; p.history.push({s:p.status, ts:Date.now()}); store.save(); render(); openPartner(p.id); toast('Статус: '+STATUSES[p.status].short);
+    });
+    b.querySelector('#pEdit').onclick = () => partnerForm(p.id);
+    b.querySelector('#pRoute').onclick = () => window.open(`https://yandex.uz/maps/?pt=${p.lng},${p.lat}&z=18&l=map`, '_blank');
+    b.querySelector('#pDel').onclick = () => {
+      const btn = b.querySelector('#pDel');
+      if (btn.dataset.sure){ db.partners = db.partners.filter(x => x.id !== p.id); store.save(); closeSheet(); render(); toast('Метка удалена'); }
+      else { btn.dataset.sure = 1; btn.textContent = 'Точно?'; }
+    };
+  });
+}
+
+/* list of partners */
+let listFilter = null, listQuery = '';
+function openList(){
+  const counts = Object.fromEntries(ST_ORDER.map(k => [k, db.partners.filter(p => p.status === k).length]));
+  openSheet(`
+    <h2>Партнёры</h2><div class="sub">Всего ${db.partners.length} · подключено ${counts.connected}</div>
+    <div class="stats">${ST_ORDER.map(k => `<button class="stat${listFilter===k?' sel':''}" data-f="${k}" style="--c:${STATUSES[k].color}"><b>${counts[k]}</b><small>${STATUSES[k].short}</small></button>`).join('')}</div>
+    <input class="search" id="q" placeholder="Поиск по названию, описанию, контакту" value="${esc(listQuery)}">
+    <div class="list" id="lst"></div>
+  `, b => {
+    const draw = () => {
+      const q = listQuery.toLowerCase();
+      const items = db.partners.filter(p => (!listFilter || p.status === listFilter) && (!q || (p.name+' '+p.desc+' '+p.contact+' '+p.note).toLowerCase().includes(q))).sort((a,b) => b.ts - a.ts);
+      b.querySelector('#lst').innerHTML = items.length ? items.map(p => `<button class="item" data-id="${p.id}" style="--c:${STATUSES[p.status].color}"><span class="dot"></span><span class="t"><b>${esc(p.name)}</b><small>${esc(p.desc || STATUSES[p.status].label)}</small></span><span class="d">${fmtShort(p.day)}</span></button>`).join('')
+        : `<div class="empty">${db.partners.length ? 'Ничего не найдено' : 'Пока нет меток.<br>Выберите «Метка» и нажмите на карту.'}</div>`;
+      b.querySelectorAll('.item').forEach(x => x.onclick = () => {
+        const p = db.partners.find(y => y.id === x.dataset.id);
+        if (db.settings.scope === 'day' && !allDays && p.day !== day){ day = p.day; render(); }
+        closeSheet(); map.flyTo([p.lat, p.lng], Math.max(map.getZoom(), 17), {duration:.7});
+        setTimeout(() => openPartner(p.id), 750);
+      });
+    };
+    b.querySelectorAll('[data-f]').forEach(x => x.onclick = () => { listFilter = listFilter === x.dataset.f ? null : x.dataset.f; b.querySelectorAll('[data-f]').forEach(y => y.classList.toggle('sel', y.dataset.f === listFilter)); draw(); });
+    b.querySelector('#q').oninput = e => { listQuery = e.target.value; draw(); };
+    draw();
+  });
+}
+$('#listBtn').onclick = openList;
+
+/* days */
+function openDays(){
+  const keys = new Set([...db.strokes.map(s => s.day), ...db.partners.map(p => p.day)]);
+  const days = [...keys].sort().reverse();
+  const total = db.strokes.reduce((a,s) => a + strokeLen(s), 0);
+  openSheet(`
+    <h2>История по дням</h2><div class="sub">${days.length} ${plural(days.length,'день','дня','дней')} · пройдено ${fmtKm(total)}</div>
+    <div class="seg" style="margin-top:14px"><button id="dOne" class="${allDays?'':'sel'}">Один день</button><button id="dAll" class="${allDays?'sel':''}">Все дни сразу</button></div>
+    <h3>Выбрать дату</h3>
+    <input type="date" class="native" id="dPick" value="${day}" max="${today()}">
+    <h3>Дни с маршрутами</h3>
+    <div class="list days">${days.length ? days.map(k => { const n = db.partners.filter(p => p.day === k).length; return `<button class="item" data-d="${k}" style="--c:${k===day&&!allDays?'#7c6cff':'rgba(255,255,255,.25)'}"><span class="dot"></span><span class="t"><b>${fmtDay(k)}</b><small>${fmtShort(k)} · ${n} ${plural(n,'метка','метки','меток')} · ${(c=>c+' '+plural(c,'линия','линии','линий'))(db.strokes.filter(s=>s.day===k).length)}</small></span><span class="d"><b>${fmtKm(dayLen(k))}</b></span></button>`; }).join('') : '<div class="empty">Нарисуйте первый маршрут инструментом «Маршрут».</div>'}</div>
+  `, b => {
+    const go = k => { allDays = false; day = k; render(); closeSheet(); fitDay(); };
+    b.querySelector('#dAll').onclick = () => { allDays = true; render(); closeSheet(); fitDay(); };
+    b.querySelector('#dOne').onclick = () => go(day);
+    b.querySelector('#dPick').onchange = e => e.target.value && go(e.target.value);
+    b.querySelectorAll('[data-d]').forEach(x => x.onclick = () => go(x.dataset.d));
+  });
+}
+function fitDay(){
+  const pts = (allDays ? db.strokes : db.strokes.filter(s => s.day === day)).flatMap(s => s.pts);
+  if (pts.length) map.flyToBounds(L.latLngBounds(pts).pad(.15), {duration:.7, maxZoom:17});
+}
+$('#dateLabel').onclick = openDays;
+$('#prevDay').onclick = () => { if (allDays){ allDays = false; } else day = shiftDay(day, -1); render(); };
+$('#nextDay').onclick = () => { if (allDays){ allDays = false; day = today(); } else if (day < today()) day = shiftDay(day, 1); render(); };
+
+/* settings */
+function tilePreview(key){ const s = STYLES[key]; return s.url.replace('{s}', 'a').replace('{z}', 13).replace('{x}', 5673).replace('{y}', 3061).replace('{r}', ''); }
+function openSettings(){
+  openSheet(`
+    <h2>Карта и данные</h2>
+    <h3>Стиль карты</h3>
+    <div class="styles">${Object.keys(STYLES).map(k => `<button class="style${db.settings.style===k?' sel':''}" data-s="${k}"><img loading="lazy" alt="" src="${tilePreview(k)}">${STYLES[k].name}</button>`).join('')}</div>
+    <h3>Показывать метки</h3>
+    <div class="seg"><button data-sc="all" class="${db.settings.scope==='all'?'sel':''}">Все партнёры</button><button data-sc="day" class="${db.settings.scope==='day'?'sel':''}">Только за выбранный день</button></div>
+    <h3>Резервная копия</h3>
+    <div class="sub">Данные хранятся на этом телефоне. Время от времени сохраняйте копию — например, в «Файлы» или Telegram.</div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="exp">Сохранить копию</button><button class="btn sm" id="imp">Загрузить копию</button></div>
+    <h3>Очистка</h3>
+    <div class="row" style="margin-top:0"><button class="btn sm danger" id="clr">Стереть маршрут за ${allDays ? 'сегодня' : fmtShort(day)}</button></div>
+  `, b => {
+    b.querySelectorAll('[data-s]').forEach(x => x.onclick = () => { setStyle(x.dataset.s); b.querySelectorAll('[data-s]').forEach(y => y.classList.toggle('sel', y === x)); });
+    b.querySelectorAll('[data-sc]').forEach(x => x.onclick = () => { db.settings.scope = x.dataset.sc; store.save(); render(); b.querySelectorAll('[data-sc]').forEach(y => y.classList.toggle('sel', y === x)); });
+    b.querySelector('#exp').onclick = exportData;
+    b.querySelector('#imp').onclick = () => $('#importFile').click();
+    b.querySelector('#clr').onclick = e => {
+      const btn = e.currentTarget, k = allDays ? today() : day;
+      if (!btn.dataset.sure){ btn.dataset.sure = 1; btn.textContent = 'Нажмите ещё раз для подтверждения'; return; }
+      db.strokes = db.strokes.filter(s => s.day !== k); store.save(); render(); closeSheet(); toast('Маршрут стёрт');
+    };
+  });
+}
+$('#layersBtn').onclick = openSettings;
+
+async function exportData(){
+  const blob = new Blob([JSON.stringify({app:'tashkent-route', v:1, exported:Date.now(), strokes:db.strokes, partners:db.partners}, null, 1)], {type:'application/json'});
+  const name = `marshrut-${today()}.json`;
+  try {
+    const file = new File([blob], name, {type:'application/json'});
+    if (navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:'Копия маршрутов'}); return; }
+  } catch(e){ if (e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+$('#importFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!Array.isArray(data.strokes) || !Array.isArray(data.partners)) throw 0;
+    const sIds = new Set(db.strokes.map(s => s.id)), pIds = new Map(db.partners.map(p => [p.id, p]));
+    let ns = 0, np = 0;
+    data.strokes.forEach(s => { if (!sIds.has(s.id)){ db.strokes.push(s); ns++; } });
+    data.partners.forEach(p => { if (!STATUSES[p.status]) return; const ex = pIds.get(p.id); if (!ex){ db.partners.push(p); np++; } else if ((p.history?.at(-1)?.ts||0) > (ex.history?.at(-1)?.ts||0)) Object.assign(ex, p); });
+    store.save(); render(); closeSheet(); toast(`Загружено: ${ns} линий, ${np} меток`);
+  } catch(err){ toast('Файл не подходит'); }
+  e.target.value = '';
+};
+
+/* ---------- boot ---------- */
+render();
+let openedOn = today();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && today() !== openedOn){ openedOn = today(); allDays = false; day = today(); render(); } });
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+window.__app = {db, map, setMode};
+})();
+</script>
+</body>
+</html>

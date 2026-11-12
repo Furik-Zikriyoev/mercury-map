@@ -12,7 +12,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin>
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+<link rel="stylesheet" href="leaflet.css">
 <style>
 :root{
   --bg:#0d0f17; --glass:rgba(20,22,33,.78); --glass-2:rgba(32,35,50,.92);
@@ -174,7 +176,8 @@ input[type=date].native{width:100%;height:48px;border-radius:14px;border:1px sol
 <div class="sheet" id="sheet"><div class="grab"></div><div class="sheet-body" id="sheetBody"></div></div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="leaflet.js"></script>
+<script>window.L||(document.write('<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>'))</script>
 <script>
 (() => {
 'use strict';
@@ -195,6 +198,7 @@ const STYLES = {
   dark:{name:'Ночь', url:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', sub:'', max:16, attr:'© Esri'}
 };
 const TASHKENT = [41.3111, 69.2797];
+const BOUNDS = [[41.13, 69.03], [41.48, 69.53]]; // Ташкент с окраинами
 const KEY = 'tashkent-route-v1';
 
 /* ---------- storage ---------- */
@@ -235,16 +239,17 @@ let day = today();
 let allDays = false;
 
 /* ---------- map ---------- */
-const map = L.map('map', {zoomControl:false, attributionControl:true, preferCanvas:false, tap:false, zoomSnap:.25, wheelPxPerZoomLevel:90});
+const map = L.map('map', {minZoom:11, maxBounds:BOUNDS, maxBoundsViscosity:.9, zoomControl:false, attributionControl:true, preferCanvas:false, tap:false, zoomSnap:.25, wheelPxPerZoomLevel:90});
 const v = db.settings.view;
-map.setView(v ? [v[0], v[1]] : TASHKENT, v ? v[2] : 13);
+const vOk = v && L.latLngBounds(BOUNDS).contains([v[0], v[1]]);
+map.setView(vOk ? [v[0], v[1]] : TASHKENT, vOk ? Math.max(v[2], 11) : 13);
 map.attributionControl.setPrefix(false);
 let tiles;
 function setStyle(key){
   if (!STYLES[key]) key = 'osm';
   const s = STYLES[key];
   if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer(s.url, {subdomains: s.sub || 'abc', maxZoom: 20, maxNativeZoom: s.max, attribution: s.attr, detectRetina: false}).addTo(map);
+  tiles = L.tileLayer(s.url, {subdomains: s.sub || 'abc', maxZoom: 20, maxNativeZoom: s.max, attribution: s.attr, detectRetina: false, bounds: BOUNDS, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 3}).addTo(map);
   db.settings.style = key; store.save();
 }
 setStyle(db.settings.style);

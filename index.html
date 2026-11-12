@@ -57,6 +57,13 @@ body.mode-eraser #map,body.mode-eraser .leaflet-interactive{cursor:none!importan
 .iconbtn{width:52px;height:52px;border-radius:18px;display:grid;place-items:center;flex:none;position:relative}
 .iconbtn:active{transform:scale(.95)}
 .iconbtn.on{background:linear-gradient(135deg,var(--accent),#5b4bff);border-color:transparent}
+.sync{position:absolute;bottom:7px;right:7px;width:9px;height:9px;border-radius:50%;background:#6b7088;box-shadow:0 0 0 2px #1b1d29;transition:background .3s}
+.sync[data-s=ok]{background:#2fd07a}
+.sync[data-s=pending]{background:#ffb020;animation:pulse 1s ease-in-out infinite}
+.sync[data-s=error]{background:#ff4d5e}
+@keyframes pulse{50%{opacity:.35}}
+.cloud{display:flex;align-items:center;gap:12px;padding:14px;border-radius:16px;background:rgba(255,255,255,.04)}
+.cloud .sync{position:static;width:12px;height:12px;flex:none}
 .badge{position:absolute;top:6px;right:6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);font-size:11px;font-weight:700;display:grid;place-items:center}
 
 /* dock */
@@ -165,7 +172,7 @@ input[type=date].native{width:100%;height:48px;border-radius:14px;border:1px sol
     <button class="arrow" id="nextDay" aria-label="Следующий день"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg></button>
   </div>
   <button class="iconbtn glass" id="listBtn" aria-label="Партнёры"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="badge" id="pCount">0</span></button>
-  <button class="iconbtn glass" id="layersBtn" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg></button>
+  <button class="iconbtn glass" id="layersBtn" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg><span class="sync" id="syncDot"></span></button>
 </div>
 
 <div class="scopebar glass"><button id="scDay" class="sel">День</button><button id="scAll">Вся история</button></div>
@@ -185,7 +192,6 @@ input[type=date].native{width:100%;height:48px;border-radius:14px;border:1px sol
 <div class="toast glass" id="toast"></div>
 <div class="backdrop" id="backdrop"></div>
 <div class="sheet" id="sheet"><div class="grab"></div><div class="sheet-body" id="sheetBody"></div></div>
-<input type="file" id="importFile" accept="application/json,.json" hidden>
 
 <script src="leaflet.js"></script>
 <script>window.L||(document.write('<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>'))</script>
@@ -215,11 +221,77 @@ const KEY = 'tashkent-route-v1';
 /* ---------- storage ---------- */
 const store = {
   load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){ return null; } },
-  save(){ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){ toast('Не удалось сохранить'); } }
+  save(localOnly){
+    if (!localOnly){ trackDeletes(); scheduleSync(); }
+    try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){ toast('Не удалось сохранить на устройстве'); }
+  }
 };
-const db = Object.assign({strokes:[], partners:[], settings:{}}, store.load() || {});
+const db = Object.assign({strokes:[], partners:[], deleted:{}, settings:{}}, store.load() || {});
+if (!db.deleted) db.deleted = {};
 db.settings = Object.assign({style:'osm', color:PEN_COLORS[0], weight:6, eraser:22, district:true, view:null}, db.settings);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+
+/* ---------- cloud sync ---------- */
+const PINKEY = 'mercury-map-pin';
+const getPin = () => { try { return localStorage.getItem(PINKEY) || ''; } catch(e){ return ''; } };
+const allItems = () => db.strokes.concat(db.partners);
+let lastIds = new Set(allItems().map(x => x.id));
+function trackDeletes(){
+  const now = Date.now(), cur = new Set();
+  allItems().forEach(x => { cur.add(x.id); if (db.deleted[x.id]){ delete db.deleted[x.id]; x.u = now; } });
+  lastIds.forEach(id => { if (!cur.has(id)) db.deleted[id] = now; });
+  lastIds = cur;
+}
+let syncTimer = null, syncing = false, syncDirty = false, syncState = 'idle', syncMsg = 'Ещё не синхронизировано', lastSync = 0, retryTimer = null, pendingRemote = null;
+function setSync(st, msg){
+  syncState = st; if (msg) syncMsg = msg;
+  const d = document.getElementById('syncDot'); if (d) d.dataset.s = st;
+  const c = document.getElementById('cloudState'); if (c) c.innerHTML = cloudHtml();
+}
+const cloudHtml = () => `<span class="sync" data-s="${syncState}"></span><div><b>${syncState==='ok' ? 'Сохранено в облаке' : syncState==='pending' ? 'Сохраняю…' : syncState==='error' ? 'Нет связи с облаком' : 'Облако'}</b><div class="sub">${esc(syncMsg)}</div></div>`;
+function scheduleSync(){ syncDirty = true; setSync('pending'); clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 600); }
+async function syncNow(){
+  if (syncing){ syncDirty = true; return; }
+  syncing = true; syncDirty = false; clearTimeout(retryTimer);
+  const sent = JSON.stringify({strokes:db.strokes, partners:db.partners, deleted:db.deleted});
+  try {
+    const r = await fetch('api/data', {method:'POST', headers:{'Content-Type':'application/json', 'x-pin':getPin()}, body:sent});
+    if (r.status === 401){ setSync('error', 'Нужен код доступа'); askPin(); return; }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error === 'storage_not_configured' ? 'Облако ещё не подключено в Vercel' : (j.error || 'Ошибка сервера'));
+    if (!syncDirty) applyRemote(j, sent);
+    lastSync = Date.now();
+    setSync('ok', 'Последнее сохранение: ' + new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit'}).format(new Date(lastSync)));
+  } catch(e){
+    setSync('error', (e && e.message && !/fetch|network|load/i.test(e.message)) ? e.message : 'Нет интернета — сохраню, как только появится связь');
+    retryTimer = setTimeout(syncNow, 15000);
+  } finally {
+    syncing = false;
+    if (syncDirty) syncNow();
+  }
+}
+function applyRemote(j, sent){
+  if (!j || !Array.isArray(j.strokes)) return;
+  if (cur || erasing){ pendingRemote = [j, sent]; return; }
+  const before = JSON.stringify({strokes:db.strokes, partners:db.partners});
+  db.strokes = j.strokes; db.partners = j.partners; db.deleted = j.deleted || {};
+  lastIds = new Set(allItems().map(x => x.id));
+  store.save(true);
+  if (JSON.stringify({strokes:db.strokes, partners:db.partners}) !== before){ undoStack.length = 0; render(); }
+}
+function askPin(){
+  if (document.getElementById('pinIn')) return;
+  openSheet(`
+    <h2>Код доступа</h2>
+    <div class="sub">Введите код, который вы задали в Vercel (APP_PIN). Он сохранится на этом устройстве.</div>
+    <div class="field"><input id="pinIn" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Код" value="${esc(getPin())}"></div>
+    <div class="row"><button class="btn" id="pinCancel">Позже</button><button class="btn primary" id="pinOk">Войти</button></div>
+  `, b => {
+    b.querySelector('#pinCancel').onclick = closeSheet;
+    b.querySelector('#pinOk').onclick = () => { try { localStorage.setItem(PINKEY, b.querySelector('#pinIn').value.trim()); } catch(e){} closeSheet(); syncNow(); };
+    setTimeout(() => b.querySelector('#pinIn').focus(), 350);
+  });
+}
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -270,7 +342,7 @@ const routeLayer = L.layerGroup().addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
 let meMarker = null;
 
-map.on('moveend', () => { const c = map.getCenter(); db.settings.view = [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]; store.save(); });
+map.on('moveend', () => { const c = map.getCenter(); db.settings.view = [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]; store.save(true); });
 const zoomCls = () => map.getContainer().classList.toggle('lowzoom', map.getZoom() < 15.5);
 map.on('zoomend', zoomCls); zoomCls();
 
@@ -392,7 +464,7 @@ function eraseAt(p){
     if (run.length > 1) runs.push(run);
     changed = true;
     const idx = db.strokes.indexOf(s);
-    db.strokes.splice(idx, 1, ...runs.map(r => ({id:uid(), day:s.day, c:s.c, w:s.w, ts:s.ts, pts:r})));
+    db.strokes.splice(idx, 1, ...runs.map(r => ({id:uid(), day:s.day, c:s.c, w:s.w, ts:s.ts, u:Date.now(), pts:r})));
   }
   if (changed){ erasing.changed = true; renderRoutes(); }
 }
@@ -433,6 +505,7 @@ function endPointer(e){
   if (erasing){
     if (erasing.changed){ store.save(); render(); } else undoStack.pop();
     erasing = null;
+    if (pendingRemote){ const pr = pendingRemote; pendingRemote = null; applyRemote(...pr); }
     if (e.pointerType !== 'mouse') ring.style.display = 'none';
     return;
   }
@@ -443,8 +516,9 @@ function endPointer(e){
   const layerPts = s.pts.map(ll => map.latLngToLayerPoint(ll));
   const simp = L.LineUtil.simplify(layerPts, 1.2).map(pt => map.layerPointToLatLng(pt));
   snap();
-  db.strokes.push({id:uid(), day, c:s.c, w:s.w, ts:Date.now(), pts: simp.map(ll => [+ll.lat.toFixed(6), +ll.lng.toFixed(6)])});
+  db.strokes.push({id:uid(), day, c:s.c, w:s.w, ts:Date.now(), u:Date.now(), pts: simp.map(ll => [+ll.lat.toFixed(6), +ll.lng.toFixed(6)])});
   store.save(); render();
+  if (pendingRemote){ const pr = pendingRemote; pendingRemote = null; applyRemote(...pr); }
 }
 el.addEventListener('pointerup', endPointer, true);
 el.addEventListener('dragstart', e => e.preventDefault(), true);
@@ -524,9 +598,9 @@ function partnerForm(id, latlng){
       const data = {name, desc:b.querySelector('#fDesc').value.trim(), contact:b.querySelector('#fContact').value.trim(), note:b.querySelector('#fNote').value.trim()};
       if (p){
         if (p.status !== status) p.history.push({s:status, ts:Date.now()});
-        Object.assign(p, data, {status});
+        Object.assign(p, data, {status, u:Date.now()});
       } else {
-        db.partners.push(Object.assign({id:uid(), lat:+latlng.lat.toFixed(6), lng:+latlng.lng.toFixed(6), day: allDays ? today() : day, ts:Date.now(), status, history:[{s:status, ts:Date.now()}]}, data));
+        db.partners.push(Object.assign({id:uid(), lat:+latlng.lat.toFixed(6), lng:+latlng.lng.toFixed(6), day: allDays ? today() : day, ts:Date.now(), u:Date.now(), status, history:[{s:status, ts:Date.now()}]}, data));
         setMode('hand');
       }
       store.save(); closeSheet(); render(); toast(p ? 'Сохранено' : 'Метка добавлена');
@@ -557,7 +631,7 @@ function openPartner(id){
   `, b => {
     b.querySelectorAll('[data-st]').forEach(x => x.onclick = () => {
       if (x.dataset.st === p.status) return;
-      p.status = x.dataset.st; p.history.push({s:p.status, ts:Date.now()}); store.save(); render(); openPartner(p.id); toast('Статус: '+STATUSES[p.status].short);
+      p.status = x.dataset.st; p.u = Date.now(); p.history.push({s:p.status, ts:Date.now()}); store.save(); render(); openPartner(p.id); toast('Статус: '+STATUSES[p.status].short);
     });
     b.querySelector('#pEdit').onclick = () => partnerForm(p.id);
     b.querySelector('#pRoute').onclick = () => window.open(`https://yandex.uz/maps/?pt=${p.lng},${p.lat}&z=18&l=map`, '_blank');
@@ -688,9 +762,10 @@ function openSettings(){
     <h3>Мирзо-Улугбекский район</h3>
     <div class="seg"><button data-dz="1" class="${db.settings.district?'sel':''}">Показывать границу</button><button data-dz="0" class="${db.settings.district?'':'sel'}">Скрыть</button></div>
     <div class="row" style="margin-top:10px"><button class="btn sm" id="dzFit">Показать район</button><button class="btn sm" id="dzReload">Обновить границу</button></div>
-    <h3>Резервная копия</h3>
-    <div class="sub">Данные хранятся на этом телефоне. Время от времени сохраняйте копию — например, в «Файлы» или Telegram.</div>
-    <div class="row" style="margin-top:10px"><button class="btn sm" id="exp">Сохранить копию</button><button class="btn sm" id="imp">Загрузить копию</button></div>
+    <h3>Облако</h3>
+    <div class="cloud" id="cloudState">${cloudHtml()}</div>
+    <div class="sub" style="margin-top:8px">Каждая линия и метка сохраняются автоматически и появляются на всех ваших устройствах.</div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="syncBtn">Синхронизировать</button><button class="btn sm" id="pinBtn">Код доступа</button></div>
     <h3>Очистка</h3>
     <div class="row" style="margin-top:0"><button class="btn sm danger" id="clr">Стереть маршрут за ${allDays ? 'сегодня' : fmtShort(day)}</button></div>
   `, b => {
@@ -702,8 +777,8 @@ function openSettings(){
     });
     b.querySelector('#dzFit').onclick = async () => { if (!districtBounds && !(await loadDistrict())) return toast('Граница ещё не загружена'); closeSheet(); map.flyToBounds(districtBounds, {padding:[20,20], duration:.7}); };
     b.querySelector('#dzReload').onclick = async () => { toast('Загружаю границу…'); if (await loadDistrict(true)){ closeSheet(); toast('Граница обновлена'); } };
-    b.querySelector('#exp').onclick = exportData;
-    b.querySelector('#imp').onclick = () => $('#importFile').click();
+    b.querySelector('#syncBtn').onclick = () => { setSync('pending'); syncNow(); };
+    b.querySelector('#pinBtn').onclick = askPin;
     b.querySelector('#clr').onclick = e => {
       const btn = e.currentTarget, k = allDays ? today() : day;
       if (!btn.dataset.sure){ btn.dataset.sure = 1; btn.textContent = 'Нажмите ещё раз для подтверждения'; return; }
@@ -713,34 +788,17 @@ function openSettings(){
 }
 $('#layersBtn').onclick = openSettings;
 
-async function exportData(){
-  const blob = new Blob([JSON.stringify({app:'tashkent-route', v:1, exported:Date.now(), strokes:db.strokes, partners:db.partners}, null, 1)], {type:'application/json'});
-  const name = `marshrut-${today()}.json`;
-  try {
-    const file = new File([blob], name, {type:'application/json'});
-    if (navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:'Копия маршрутов'}); return; }
-  } catch(e){ if (e.name === 'AbortError') return; }
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-}
-$('#importFile').onchange = async e => {
-  const f = e.target.files[0]; if (!f) return;
-  try {
-    const data = JSON.parse(await f.text());
-    if (!Array.isArray(data.strokes) || !Array.isArray(data.partners)) throw 0;
-    const sIds = new Set(db.strokes.map(s => s.id)), pIds = new Map(db.partners.map(p => [p.id, p]));
-    let ns = 0, np = 0;
-    data.strokes.forEach(s => { if (!sIds.has(s.id)){ db.strokes.push(s); ns++; } });
-    data.partners.forEach(p => { if (!STATUSES[p.status]) return; const ex = pIds.get(p.id); if (!ex){ db.partners.push(p); np++; } else if ((p.history?.at(-1)?.ts||0) > (ex.history?.at(-1)?.ts||0)) Object.assign(ex, p); });
-    store.save(); render(); closeSheet(); toast(`Загружено: ${ns} линий, ${np} меток`);
-  } catch(err){ toast('Файл не подходит'); }
-  e.target.value = '';
-};
-
 /* ---------- boot ---------- */
 render();
 let openedOn = today();
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && today() !== openedOn){ openedOn = today(); allDays = false; day = today(); render(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (today() !== openedOn){ openedOn = today(); allDays = false; day = today(); render(); }
+  syncNow();
+});
+window.addEventListener('online', syncNow);
+setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 60000);
+syncNow();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 window.__app = {db, map, setMode};
 })();

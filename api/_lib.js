@@ -119,8 +119,8 @@ function distM(a, b) {
 }
 function trackKm(pts) { let d = 0; for (let i = 1; i < pts.length; i++) if (pts[i][2] - pts[i - 1][2] < 10 * 60e3) d += distM(pts[i - 1], pts[i]); return d; }
 // Сохраняет точки трека (только в рабочее время) и обновляет «где сейчас»
-async function storeTrack(u, points, extra = {}) {
-  const good = (points || []).filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]) && inWork(p[2]) && (p[3] || 0) <= 80);
+async function storeTrack(u, points, extra = {}, maxAcc = 80) {
+  const good = (points || []).filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]) && inWork(p[2]) && (p[3] || 0) <= maxAcc);
   if (!good.length) return 0;
   const byDay = {};
   for (const p of good) (byDay[dayOf(p[2])] = byDay[dayOf(p[2])] || []).push(encPt(p));

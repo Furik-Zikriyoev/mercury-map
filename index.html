@@ -35,7 +35,7 @@ body.mode-eraser .leaflet-interactive{cursor:not-allowed!important}
 .glass{background:var(--glass);backdrop-filter:blur(22px) saturate(1.6);-webkit-backdrop-filter:blur(22px) saturate(1.6);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
 
 /* top bar */
-.topbar{position:fixed;z-index:500;top:calc(var(--safe-t) + 10px);left:12px;right:12px;display:flex;gap:8px;align-items:center}
+.topbar{position:fixed;z-index:500;top:calc(var(--safe-t) + 10px);left:12px;right:12px;max-width:560px;margin:0 auto;display:flex;gap:8px;align-items:center}
 .datepill{display:flex;align-items:center;border-radius:18px;padding:4px;min-width:0;flex:1}
 .datepill .arrow{width:38px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none}
 .datepill .arrow:active{background:rgba(255,255,255,.08)}
@@ -189,10 +189,10 @@ const ST_ORDER = ['refused','contacts','agreed','connected'];
 const PEN_COLORS = ['#7c6cff','#ff3b7f','#00b8a9','#ff8a00','#1f2937'];
 const WEIGHTS = [4,6,9];
 const STYLES = {
-  voyager:{name:'Улицы', url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', sub:'abcd', max:20, attr:'© OpenStreetMap, © CARTO'},
-  osm:{name:'OSM', url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub:'', max:19, attr:'© OpenStreetMap'},
+  osm:{name:'Улицы', url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub:'', max:19, attr:'© OpenStreetMap'},
+  esri:{name:'Esri', url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', sub:'', max:19, attr:'© Esri, © OpenStreetMap'},
   sat:{name:'Спутник', url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', sub:'', max:19, attr:'© Esri'},
-  dark:{name:'Ночь', url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', sub:'abcd', max:20, attr:'© OpenStreetMap, © CARTO'}
+  dark:{name:'Ночь', url:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', sub:'', max:16, attr:'© Esri'}
 };
 const TASHKENT = [41.3111, 69.2797];
 const KEY = 'tashkent-route-v1';
@@ -203,7 +203,7 @@ const store = {
   save(){ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){ toast('Не удалось сохранить'); } }
 };
 const db = Object.assign({strokes:[], partners:[], settings:{}}, store.load() || {});
-db.settings = Object.assign({style:'voyager', color:PEN_COLORS[0], weight:6, scope:'all', view:null}, db.settings);
+db.settings = Object.assign({style:'osm', color:PEN_COLORS[0], weight:6, scope:'all', view:null}, db.settings);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 
 /* ---------- helpers ---------- */
@@ -241,7 +241,8 @@ map.setView(v ? [v[0], v[1]] : TASHKENT, v ? v[2] : 13);
 map.attributionControl.setPrefix(false);
 let tiles;
 function setStyle(key){
-  const s = STYLES[key] || STYLES.voyager;
+  if (!STYLES[key]) key = 'osm';
+  const s = STYLES[key];
   if (tiles) map.removeLayer(tiles);
   tiles = L.tileLayer(s.url, {subdomains: s.sub || 'abc', maxZoom: 20, maxNativeZoom: s.max, attribution: s.attr, detectRetina: false}).addTo(map);
   db.settings.style = key; store.save();

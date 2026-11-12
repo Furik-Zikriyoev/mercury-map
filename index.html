@@ -32,7 +32,12 @@ input,textarea{font:inherit;color:var(--text)}
 .leaflet-control-zoom{display:none}
 body.mode-pen #map,body.mode-pen .leaflet-interactive{cursor:crosshair!important}
 body.mode-pin #map{cursor:copy}
-body.mode-eraser .leaflet-interactive{cursor:not-allowed!important}
+body.mode-eraser #map,body.mode-eraser .leaflet-interactive{cursor:none!important}
+.scopebar{position:fixed;z-index:500;top:calc(var(--safe-t) + 72px);left:50%;transform:translateX(-50%);display:flex;padding:4px;border-radius:15px}
+.scopebar button{height:32px;padding:0 16px;border-radius:11px;font-size:13px;font-weight:650;color:var(--muted);transition:.2s}
+.scopebar button.sel{background:linear-gradient(135deg,var(--accent),#5b4bff);color:#fff}
+.eraser-ring{position:fixed;z-index:450;left:0;top:0;pointer-events:none;border:2px solid #ff4d5e;background:rgba(255,77,94,.14);border-radius:50%;display:none;box-shadow:0 0 0 1px rgba(255,255,255,.7)}
+.ering{border-radius:50%;border:2px solid currentColor;display:block}
 
 .glass{background:var(--glass);backdrop-filter:blur(22px) saturate(1.6);-webkit-backdrop-filter:blur(22px) saturate(1.6);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
 
@@ -68,7 +73,7 @@ body.mode-eraser .leaflet-interactive{cursor:not-allowed!important}
 .wbtn{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#c9cde0}
 .wbtn.sel{background:rgba(255,255,255,.14);color:#fff}
 
-.toast{position:fixed;z-index:700;left:50%;top:calc(var(--safe-t) + 74px);transform:translate(-50%,-8px);padding:10px 16px;border-radius:16px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+.toast{position:fixed;z-index:700;left:50%;top:calc(var(--safe-t) + 120px);transform:translate(-50%,-8px);padding:10px 16px;border-radius:16px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 /* pins */
@@ -159,6 +164,8 @@ input[type=date].native{width:100%;height:48px;border-radius:14px;border:1px sol
   <button class="iconbtn glass" id="layersBtn" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg></button>
 </div>
 
+<div class="scopebar glass"><button id="scDay" class="sel">День</button><button id="scAll">Вся история</button></div>
+<div class="eraser-ring" id="ring"></div>
 <div class="palette glass" id="palette"></div>
 
 <div class="dock glass">
@@ -207,7 +214,7 @@ const store = {
   save(){ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){ toast('Не удалось сохранить'); } }
 };
 const db = Object.assign({strokes:[], partners:[], settings:{}}, store.load() || {});
-db.settings = Object.assign({style:'osm', color:PEN_COLORS[0], weight:6, scope:'all', view:null}, db.settings);
+db.settings = Object.assign({style:'osm', color:PEN_COLORS[0], weight:6, eraser:22, district:true, view:null}, db.settings);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 
 /* ---------- helpers ---------- */
@@ -269,31 +276,34 @@ function pinIcon(color, ghost){
     html:`<div class="pin${ghost?' ghost':''}"><svg viewBox="0 0 34 44" width="34" height="44"><path d="M17 1C8.2 1 1 8 1 16.6 1 28 17 43 17 43s16-15 16-26.4C33 8 25.8 1 17 1z" fill="${color}" stroke="#fff" stroke-width="2"/></svg><i></i></div>`});
 }
 
-function render(){
-  routeLayer.clearLayers(); pinLayer.clearLayers();
+const pDays = p => new Set([p.day, ...(p.history || []).map(h => dayKey(h.ts))]);
+const onDay = (p, k) => pDays(p).has(k);
+function render(){ renderRoutes(); renderPins(); updateHeader(); }
+function renderRoutes(){
+  routeLayer.clearLayers();
   const strokes = allDays ? db.strokes : db.strokes.filter(s => s.day === day);
   strokes.forEach(s => {
     const op = allDays && s.day !== day ? .6 : 1;
     L.polyline(s.pts, {renderer, color:'#fff', weight:s.w+4, opacity:.85*op, lineCap:'round', lineJoin:'round', interactive:false}).addTo(routeLayer);
     const line = L.polyline(s.pts, {renderer, color:s.c, weight:s.w, opacity:op, lineCap:'round', lineJoin:'round'}).addTo(routeLayer);
-    line.on('click', e => {
-      if (mode === 'eraser'){ L.DomEvent.stop(e); db.strokes = db.strokes.filter(x => x.id !== s.id); store.save(); render(); toast('Линия удалена'); }
-      else if (mode === 'hand'){ toast(fmtDay(s.day)+' · '+fmtKm(strokeLen(s))); }
-    });
+    line.on('click', () => { if (mode === 'hand') toast(fmtDay(s.day)+' · '+fmtKm(strokeLen(s))); });
   });
-  const pins = (db.settings.scope === 'day' && !allDays) ? db.partners.filter(p => p.day === day) : db.partners;
+}
+function renderPins(){
+  pinLayer.clearLayers();
+  const pins = allDays ? db.partners : db.partners.filter(p => onDay(p, day));
   pins.forEach(p => {
     const m = L.marker([p.lat, p.lng], {icon: pinIcon(STATUSES[p.status].color)}).addTo(pinLayer);
     m.bindTooltip(esc(p.name), {permanent:true, direction:'bottom', offset:[0,2], className:'pin-label'});
-    m.on('click', e => { L.DomEvent.stop(e); if (mode === 'pen') return; openPartner(p.id); });
+    m.on('click', e => { L.DomEvent.stop(e); if (mode === 'pen' || mode === 'eraser') return; openPartner(p.id); });
   });
-  updateHeader();
 }
 
 function updateHeader(){
-  $('#dateTitle').textContent = allDays ? 'Все дни' : fmtDay(day);
+  $('#dateTitle').textContent = allDays ? 'Вся история' : fmtDay(day);
+  $('#scDay').classList.toggle('sel', !allDays); $('#scAll').classList.toggle('sel', allDays);
   const len = allDays ? db.strokes.reduce((a,s) => a + strokeLen(s), 0) : dayLen(day);
-  const np = allDays ? db.partners.length : db.partners.filter(p => p.day === day).length;
+  const np = allDays ? db.partners.length : db.partners.filter(p => onDay(p, day)).length;
   $('#dateSub').innerHTML = `<span class="km">${fmtKm(len)}</span> · ${np} ${plural(np,'метка','метки','меток')}${allDays ? '' : ' за день'}`;
   $('#pCount').textContent = db.partners.length;
   $('#pCount').style.display = db.partners.length ? '' : 'none';
@@ -307,16 +317,24 @@ function setMode(m){
   mode = m;
   document.body.className = 'mode-' + m;
   document.querySelectorAll('.tool[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-  $('#palette').classList.toggle('show', m === 'pen');
-  if (m === 'pen'){ map.dragging.disable(); toast('Ведите пальцем по улицам · двумя пальцами — масштаб'); }
-  else map.dragging.enable();
+  renderPalette();
+  $('#palette').classList.toggle('show', m === 'pen' || m === 'eraser');
+  $('#ring').style.display = 'none';
+  if (m === 'pen' || m === 'eraser') map.dragging.disable(); else map.dragging.enable();
+  if (m === 'pen') toast('Ведите пальцем по улицам · двумя пальцами — масштаб');
   if (m === 'pin') toast('Нажмите на место, где находится партнёр');
-  if (m === 'eraser') toast('Нажмите на линию, чтобы удалить её');
+  if (m === 'eraser') toast('Проведите по линии, чтобы стереть кусок');
 }
 document.querySelectorAll('.tool[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
+const ERASERS = [12, 22, 38];
 function renderPalette(){
   const p = $('#palette');
+  if (mode === 'eraser'){
+    p.innerHTML = '<span class="sub" style="align-self:center;margin-right:2px">Размер</span>' + ERASERS.map(r => `<button class="wbtn${r===db.settings.eraser?' sel':''}" data-r="${r}" style="width:42px;height:42px;color:#ff7584"><span class="ering" style="width:${Math.round(r*0.8)+6}px;height:${Math.round(r*0.8)+6}px"></span></button>`).join('');
+    p.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { db.settings.eraser = +b.dataset.r; store.save(); renderPalette(); });
+    return;
+  }
   p.innerHTML = PEN_COLORS.map(c => `<button class="swatch${c===db.settings.color?' sel':''}" style="--c:${c}" data-c="${c}"></button>`).join('')
     + '<span class="w"></span>' + WEIGHTS.map(w => `<button class="wbtn${w===db.settings.weight?' sel':''}" data-w="${w}"><span style="display:block;width:${w+4}px;height:${w+4}px;border-radius:50%;background:currentColor"></span></button>`).join('');
   p.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { db.settings.color = b.dataset.c; store.save(); renderPalette(); });
@@ -330,8 +348,59 @@ const pointers = new Map();
 let cur = null;
 const cpt = e => { const r = el.getBoundingClientRect(); return L.point(e.clientX - r.left, e.clientY - r.top); };
 function cancelStroke(){ if (cur){ routeLayer.removeLayer(cur.casing); routeLayer.removeLayer(cur.line); cur = null; } }
+/* undo history (this session) */
+const undoStack = [];
+const snap = () => { undoStack.push(JSON.stringify(db.strokes)); if (undoStack.length > 50) undoStack.shift(); };
+
+/* area eraser */
+let erasing = null;
+const ring = $('#ring');
+function showRing(e){
+  const r = db.settings.eraser;
+  ring.style.width = ring.style.height = (r*2)+'px';
+  ring.style.transform = `translate(${e.clientX - r}px, ${e.clientY - r}px)`;
+  ring.style.display = 'block';
+}
+const r6 = ll => [+ll.lat.toFixed(6), +ll.lng.toFixed(6)];
+function eraseAt(p){
+  const R = db.settings.eraser, step = Math.max(2, R/3);
+  const visible = allDays ? db.strokes : db.strokes.filter(s => s.day === day);
+  let changed = false;
+  for (const s of visible){
+    const cps = s.pts.map(ll => map.latLngToContainerPoint(ll));
+    let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+    for (const c of cps){ if(c.x<minX)minX=c.x; if(c.x>maxX)maxX=c.x; if(c.y<minY)minY=c.y; if(c.y>maxY)maxY=c.y; }
+    if (p.x < minX-R || p.x > maxX+R || p.y < minY-R || p.y > maxY+R) continue;
+    const runs = []; let run = []; let hit = false;
+    const add = (pt, ll) => { if (pt.distanceTo(p) <= R){ hit = true; if (run.length > 1) runs.push(run); run = []; } else run.push(ll); };
+    add(cps[0], s.pts[0]);
+    for (let i = 1; i < cps.length; i++){
+      const a = cps[i-1], b = cps[i];
+      if (L.LineUtil.pointToSegmentDistance(p, a, b) <= R + step){
+        const n = Math.max(1, Math.ceil(a.distanceTo(b) / step));
+        for (let k = 1; k <= n; k++){
+          const t = k/n, pt = L.point(a.x + (b.x-a.x)*t, a.y + (b.y-a.y)*t);
+          add(pt, k === n ? s.pts[i] : r6(map.containerPointToLatLng(pt)));
+        }
+      } else add(b, s.pts[i]);
+    }
+    if (!hit) continue;
+    if (run.length > 1) runs.push(run);
+    changed = true;
+    const idx = db.strokes.indexOf(s);
+    db.strokes.splice(idx, 1, ...runs.map(r => ({id:uid(), day:s.day, c:s.c, w:s.w, ts:s.ts, pts:r})));
+  }
+  if (changed){ erasing.changed = true; renderRoutes(); }
+}
+
 el.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, true);
+  if (mode === 'eraser'){
+    if (pointers.size > 1){ if (erasing && !erasing.changed) undoStack.pop(); erasing = null; ring.style.display = 'none'; return; }
+    if (e.target.closest('.leaflet-control')) return;
+    snap(); erasing = {changed:false}; showRing(e); eraseAt(cpt(e));
+    return;
+  }
   if (mode !== 'pen') return;
   if (pointers.size > 1){ cancelStroke(); map.dragging.disable(); return; }
   if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
@@ -342,6 +411,11 @@ el.addEventListener('pointerdown', e => {
     line: L.polyline([ll], {renderer, color:c, weight:w, lineCap:'round', lineJoin:'round', interactive:false}).addTo(routeLayer) };
 }, true);
 el.addEventListener('pointermove', e => {
+  if (mode === 'eraser'){
+    if (e.pointerType === 'mouse' || erasing) showRing(e);
+    if (erasing && pointers.size === 1) eraseAt(cpt(e));
+    return;
+  }
   if (!cur || mode !== 'pen' || pointers.size > 1) return;
   const p = cpt(e);
   if (p.distanceTo(cur.last) < 3) return;
@@ -351,21 +425,29 @@ el.addEventListener('pointermove', e => {
 }, true);
 function endPointer(e){
   pointers.delete(e.pointerId);
+  if (erasing){
+    if (erasing.changed){ store.save(); render(); } else undoStack.pop();
+    erasing = null;
+    if (e.pointerType !== 'mouse') ring.style.display = 'none';
+    return;
+  }
   if (!cur) return;
   const s = cur; cur = null;
   routeLayer.removeLayer(s.casing); routeLayer.removeLayer(s.line);
   if (s.pts.length < 2) return;
   const layerPts = s.pts.map(ll => map.latLngToLayerPoint(ll));
   const simp = L.LineUtil.simplify(layerPts, 1.2).map(pt => map.layerPointToLatLng(pt));
+  snap();
   db.strokes.push({id:uid(), day, c:s.c, w:s.w, ts:Date.now(), pts: simp.map(ll => [+ll.lat.toFixed(6), +ll.lng.toFixed(6)])});
   store.save(); render();
 }
 el.addEventListener('pointerup', endPointer, true);
 el.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); cancelStroke(); }, true);
-el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') endPointer(e); }, true);
+el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse'){ endPointer(e); ring.style.display = 'none'; } }, true);
 
 /* ---------- undo ---------- */
 $('#undoBtn').onclick = () => {
+  if (undoStack.length){ db.strokes = JSON.parse(undoStack.pop()); store.save(); render(); return toast('Отменено'); }
   const mine = db.strokes.filter(s => s.day === (allDays ? today() : day));
   if (!mine.length) return toast('Нечего отменять');
   const last = mine.reduce((a,b) => a.ts > b.ts ? a : b);
@@ -497,7 +579,7 @@ function openList(){
         : `<div class="empty">${db.partners.length ? 'Ничего не найдено' : 'Пока нет меток.<br>Выберите «Метка» и нажмите на карту.'}</div>`;
       b.querySelectorAll('.item').forEach(x => x.onclick = () => {
         const p = db.partners.find(y => y.id === x.dataset.id);
-        if (db.settings.scope === 'day' && !allDays && p.day !== day){ day = p.day; render(); }
+        if (!allDays && !onDay(p, day)){ day = p.day; render(); }
         closeSheet(); map.flyTo([p.lat, p.lng], Math.max(map.getZoom(), 17), {duration:.7});
         setTimeout(() => openPartner(p.id), 750);
       });
@@ -516,7 +598,7 @@ function openDays(){
   const total = db.strokes.reduce((a,s) => a + strokeLen(s), 0);
   openSheet(`
     <h2>История по дням</h2><div class="sub">${days.length} ${plural(days.length,'день','дня','дней')} · пройдено ${fmtKm(total)}</div>
-    <div class="seg" style="margin-top:14px"><button id="dOne" class="${allDays?'':'sel'}">Один день</button><button id="dAll" class="${allDays?'sel':''}">Все дни сразу</button></div>
+    <div class="seg" style="margin-top:14px"><button id="dOne" class="${allDays?'':'sel'}">Один день</button><button id="dAll" class="${allDays?'sel':''}">Вся история</button></div>
     <h3>Выбрать дату</h3>
     <input type="date" class="native" id="dPick" value="${day}" max="${today()}">
     <h3>Дни с маршрутами</h3>
@@ -537,6 +619,58 @@ $('#dateLabel').onclick = openDays;
 $('#prevDay').onclick = () => { if (allDays){ allDays = false; } else day = shiftDay(day, -1); render(); };
 $('#nextDay').onclick = () => { if (allDays){ allDays = false; day = today(); } else if (day < today()) day = shiftDay(day, 1); render(); };
 
+/* day / history switch */
+$('#scDay').onclick = () => { if (!allDays) return; allDays = false; render(); };
+$('#scAll').onclick = () => { if (allDays) return; allDays = true; render(); fitDay(); };
+
+/* ---------- Мирзо-Улугбекский район ---------- */
+const DKEY = 'mirzo-ulugbek-geo-v1';
+const DQUERIES = ['Мирзо-Улугбекский район, Ташкент', 'Mirzo Ulugbek district, Tashkent', 'Mirzo Ulugʻbek tumani'];
+map.createPane('district'); map.getPane('district').style.zIndex = 350; map.getPane('district').style.pointerEvents = 'none';
+let districtLayer = null, districtBounds = null;
+function pickGeom(gj){
+  if (!gj) return null;
+  const fs = gj.type === 'FeatureCollection' ? gj.features : gj.type === 'Feature' ? [gj] : [{geometry:gj}];
+  const f = (fs || []).find(f => f && f.geometry && /Polygon/.test(f.geometry.type));
+  return f ? f.geometry : null;
+}
+function drawDistrict(geom){
+  if (districtLayer) map.removeLayer(districtLayer);
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  const outer = polys.map(pg => pg[0].map(([x, y]) => [y, x]));
+  const world = [[85,-180],[85,180],[-85,180],[-85,-180]];
+  districtLayer = L.layerGroup([
+    L.polygon([world, ...outer], {pane:'district', stroke:false, fillColor:'#141626', fillOpacity:.3, interactive:false}),
+    L.polygon(outer, {pane:'district', color:'#fff', weight:7, opacity:.9, fill:false, interactive:false}),
+    L.polygon(outer, {pane:'district', color:'#7c6cff', weight:3.5, fill:true, fillColor:'#7c6cff', fillOpacity:.04, interactive:false})
+  ]);
+  districtBounds = L.latLngBounds(outer.flat());
+  if (db.settings.district) districtLayer.addTo(map);
+}
+async function fetchNominatim(){
+  for (const q of DQUERIES){
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, countrycodes:'uz', format:'geojson', polygon_geojson:'1', polygon_threshold:'0.00003', limit:'5', 'accept-language':'ru'});
+      const r = await fetch(url); if (!r.ok) continue;
+      const g = pickGeom(await r.json()); if (g) return g;
+    } catch(e){}
+  }
+  return null;
+}
+async function loadDistrict(force){
+  let geom = null;
+  if (!force){ try { geom = JSON.parse(localStorage.getItem(DKEY)); } catch(e){} }
+  if (!geom && !force){ try { const r = await fetch('mirzo-ulugbek.geojson', {cache:'no-cache'}); if (r.ok) geom = pickGeom(await r.json()); } catch(e){} }
+  if (!geom) geom = await fetchNominatim();
+  if (!geom){ if (force) toast('Не удалось загрузить границу района'); return false; }
+  try { localStorage.setItem(DKEY, JSON.stringify(geom)); } catch(e){}
+  const first = !districtLayer;
+  drawDistrict(geom);
+  if ((first && !db.settings.view) || force) map.flyToBounds(districtBounds, {padding:[20,20], duration:.7});
+  return true;
+}
+loadDistrict();
+
 /* settings */
 function tilePreview(key){ const s = STYLES[key]; return s.url.replace('{s}', 'a').replace('{z}', 13).replace('{x}', 5673).replace('{y}', 3061).replace('{r}', ''); }
 function openSettings(){
@@ -544,8 +678,9 @@ function openSettings(){
     <h2>Карта и данные</h2>
     <h3>Стиль карты</h3>
     <div class="styles">${Object.keys(STYLES).map(k => `<button class="style${db.settings.style===k?' sel':''}" data-s="${k}"><img loading="lazy" alt="" src="${tilePreview(k)}">${STYLES[k].name}</button>`).join('')}</div>
-    <h3>Показывать метки</h3>
-    <div class="seg"><button data-sc="all" class="${db.settings.scope==='all'?'sel':''}">Все партнёры</button><button data-sc="day" class="${db.settings.scope==='day'?'sel':''}">Только за выбранный день</button></div>
+    <h3>Мирзо-Улугбекский район</h3>
+    <div class="seg"><button data-dz="1" class="${db.settings.district?'sel':''}">Показывать границу</button><button data-dz="0" class="${db.settings.district?'':'sel'}">Скрыть</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="dzFit">Показать район</button><button class="btn sm" id="dzReload">Обновить границу</button></div>
     <h3>Резервная копия</h3>
     <div class="sub">Данные хранятся на этом телефоне. Время от времени сохраняйте копию — например, в «Файлы» или Telegram.</div>
     <div class="row" style="margin-top:10px"><button class="btn sm" id="exp">Сохранить копию</button><button class="btn sm" id="imp">Загрузить копию</button></div>
@@ -553,7 +688,13 @@ function openSettings(){
     <div class="row" style="margin-top:0"><button class="btn sm danger" id="clr">Стереть маршрут за ${allDays ? 'сегодня' : fmtShort(day)}</button></div>
   `, b => {
     b.querySelectorAll('[data-s]').forEach(x => x.onclick = () => { setStyle(x.dataset.s); b.querySelectorAll('[data-s]').forEach(y => y.classList.toggle('sel', y === x)); });
-    b.querySelectorAll('[data-sc]').forEach(x => x.onclick = () => { db.settings.scope = x.dataset.sc; store.save(); render(); b.querySelectorAll('[data-sc]').forEach(y => y.classList.toggle('sel', y === x)); });
+    b.querySelectorAll('[data-dz]').forEach(x => x.onclick = () => {
+      db.settings.district = x.dataset.dz === '1'; store.save();
+      if (districtLayer){ if (db.settings.district) districtLayer.addTo(map); else map.removeLayer(districtLayer); }
+      b.querySelectorAll('[data-dz]').forEach(y => y.classList.toggle('sel', y === x));
+    });
+    b.querySelector('#dzFit').onclick = async () => { if (!districtBounds && !(await loadDistrict())) return toast('Граница ещё не загружена'); closeSheet(); map.flyToBounds(districtBounds, {padding:[20,20], duration:.7}); };
+    b.querySelector('#dzReload').onclick = async () => { toast('Загружаю границу…'); if (await loadDistrict(true)){ closeSheet(); toast('Граница обновлена'); } };
     b.querySelector('#exp').onclick = exportData;
     b.querySelector('#imp').onclick = () => $('#importFile').click();
     b.querySelector('#clr').onclick = e => {

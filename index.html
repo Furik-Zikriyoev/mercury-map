@@ -27,6 +27,10 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 input,textarea{font:inherit;color:var(--text)}
 #map{position:fixed;inset:0;background:#dfe3ea}
+html,body,#map,#map *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#map img{-webkit-user-drag:none;user-drag:none}
+.sheet input,.sheet textarea{-webkit-user-select:text;user-select:text}
+::selection{background:transparent}
 .leaflet-container{font:inherit}
 .leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.6)!important;margin-bottom:calc(var(--safe-b) + 92px)!important}
 .leaflet-control-zoom{display:none}
@@ -398,12 +402,13 @@ el.addEventListener('pointerdown', e => {
   if (mode === 'eraser'){
     if (pointers.size > 1){ if (erasing && !erasing.changed) undoStack.pop(); erasing = null; ring.style.display = 'none'; return; }
     if (e.target.closest('.leaflet-control')) return;
-    snap(); erasing = {changed:false}; showRing(e); eraseAt(cpt(e));
+    e.preventDefault(); snap(); erasing = {changed:false}; showRing(e); eraseAt(cpt(e));
     return;
   }
   if (mode !== 'pen') return;
   if (pointers.size > 1){ cancelStroke(); map.dragging.disable(); return; }
   if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
+  e.preventDefault(); window.getSelection && window.getSelection().removeAllRanges();
   const p = cpt(e), ll = map.containerPointToLatLng(p);
   const c = db.settings.color, w = db.settings.weight;
   cur = { pts:[ll], last:p, c, w,
@@ -442,6 +447,8 @@ function endPointer(e){
   store.save(); render();
 }
 el.addEventListener('pointerup', endPointer, true);
+el.addEventListener('dragstart', e => e.preventDefault(), true);
+el.addEventListener('selectstart', e => { if (mode === 'pen' || mode === 'eraser') e.preventDefault(); }, true);
 el.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); cancelStroke(); }, true);
 el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse'){ endPointer(e); ring.style.display = 'none'; } }, true);
 
@@ -640,7 +647,7 @@ function drawDistrict(geom){
   const outer = polys.map(pg => pg[0].map(([x, y]) => [y, x]));
   const world = [[85,-180],[85,180],[-85,180],[-85,-180]];
   districtLayer = L.layerGroup([
-    L.polygon([world, ...outer], {pane:'district', stroke:false, fillColor:'#141626', fillOpacity:.3, interactive:false}),
+    L.polygon([world, ...outer], {pane:'district', stroke:false, fillColor:'#141626', fillOpacity:.18, interactive:false}),
     L.polygon(outer, {pane:'district', color:'#fff', weight:7, opacity:.9, fill:false, interactive:false}),
     L.polygon(outer, {pane:'district', color:'#7c6cff', weight:3.5, fill:true, fillColor:'#7c6cff', fillOpacity:.04, interactive:false})
   ]);

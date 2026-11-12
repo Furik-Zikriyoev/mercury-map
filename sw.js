@@ -1,4 +1,4 @@
-const SHELL = 'route-shell-v4', TILES = 'route-tiles-v2';
+const SHELL = 'route-shell-v5', TILES = 'route-tiles-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png',
   './leaflet.css', './leaflet.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => Promise.all(ASSETS.map(a => c.add(a).catch(() => {})))).then(() => self.skipWaiting())); });

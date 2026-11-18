@@ -150,10 +150,27 @@ map.on('moveend', () => { const c = map.getCenter(); cfg.view = [+c.lat.toFixed(
 const zoomCls = () => map.getContainer().classList.toggle('lowzoom', map.getZoom() < 15.5);
 map.on('zoomend', zoomCls); zoomCls();
 
-/* ---------- Мирзо-Улугбекский район ---------- */
-const GEOKEY = 'mirzo-ulugbek-geo-v1';
-const DQUERIES = ['Мирзо-Улугбекский район, Ташкент', 'Mirzo Ulugbek district, Tashkent', 'Mirzo Ulugʻbek tumani'];
-let districtLayer = null, districtBounds = null, districtRings = [], districtCells = null;
+/* ---------- Районы менеджеров ---------- */
+// У каждого менеджера есть свои районы (user.districts). Граница, затемнение и % покрытия считаются по районам тех, кого мы сейчас смотрим.
+const DISTRICTS = [
+  {id:'mirzo-ulugbek', name:'Мирзо-Улугбекский', file:'mirzo-ulugbek.geojson', q:['Мирзо-Улугбекский район, Ташкент','Mirzo Ulugbek district, Tashkent','Mirzo Ulugʻbek tumani']},
+  {id:'yunusabad', name:'Юнусабадский', q:['Юнусабадский район, Ташкент','Yunusabad district, Tashkent']},
+  {id:'chilanzar', name:'Чиланзарский', q:['Чиланзарский район, Ташкент','Chilanzar district, Tashkent']},
+  {id:'yakkasaray', name:'Яккасарайский', q:['Яккасарайский район, Ташкент','Yakkasaray district, Tashkent']},
+  {id:'mirabad', name:'Мирабадский', q:['Мирабадский район, Ташкент','Mirabad district, Tashkent']},
+  {id:'shaykhantakhur', name:'Шайхантахурский', q:['Шайхантахурский район, Ташкент','Shaykhantakhur district, Tashkent']},
+  {id:'almazar', name:'Алмазарский', q:['Алмазарский район, Ташкент','Almazar district, Tashkent']},
+  {id:'uchtepa', name:'Учтепинский', q:['Учтепинский район, Ташкент','Uchtepa district, Tashkent']},
+  {id:'sergeli', name:'Сергелийский', q:['Сергелийский район, Ташкент','Sergeli district, Tashkent']},
+  {id:'yashnabad', name:'Яшнабадский', q:['Яшнабадский район, Ташкент','Yashnabad district, Tashkent']},
+  {id:'bektemir', name:'Бектемирский', q:['Бектемирский район, Ташкент','Bektemir district, Tashkent']},
+  {id:'yangihayot', name:'Янгихаётский', q:['Янгихаётский район, Ташкент','Yangihayot district, Tashkent']}
+];
+const DEFAULT_D = 'mirzo-ulugbek';
+const distName = id => (DISTRICTS.find(d => d.id === id) || {name:id}).name;
+const distNames = ids => (ids && ids.length ? ids : [DEFAULT_D]).map(distName).join(', ');
+const dcache = {}, dpend = {};
+let districtLayer = null, districtBounds = null, districtRings = [], districtCells = null, shownKey = '', refreshing = false, districtFlown = false;
 function pickGeom(gj){
   if (!gj) return null;
   const fs = gj.type === 'FeatureCollection' ? gj.features : gj.type === 'Feature' ? [gj] : [{geometry:gj}];
@@ -161,49 +178,71 @@ function pickGeom(gj){
   return f ? f.geometry : null;
 }
 function inRing(lat, lng, ring){ let ins = false; for (let i = 0, j = ring.length-1; i < ring.length; j = i++){ const [xi, yi] = ring[i], [xj, yj] = ring[j]; if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) ins = !ins; } return ins; }
+const polysOf = g => g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
 const inDistrict = (lat, lng) => districtRings.some(r => inRing(lat, lng, r));
-function drawDistrict(geom){
-  if (districtLayer) map.removeLayer(districtLayer);
-  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
-  districtRings = polys.map(pg => pg[0]);
-  const outer = polys.map(pg => pg[0].map(([x, y]) => [y, x]));
-  const world = [[85,-180],[85,180],[-85,180],[-85,-180]];
-  districtLayer = L.layerGroup([
-    L.polygon([world, ...outer], {pane:'district', stroke:false, fillColor:'#141626', fillOpacity:.16, interactive:false}),
-    L.polygon(outer, {pane:'district', color:'#fff', weight:7, opacity:.9, fill:false, interactive:false}),
-    L.polygon(outer, {pane:'district', color:'#7c6cff', weight:3.5, fill:true, fillColor:'#7c6cff', fillOpacity:.03, interactive:false})
-  ]);
-  districtBounds = L.latLngBounds(outer.flat());
-  if (cfg.district) districtLayer.addTo(map);
-  // клетки сетки покрытия внутри района
-  districtCells = new Set();
-  const sw = districtBounds.getSouthWest(), ne = districtBounds.getNorthEast();
-  for (let i = Math.floor(sw.lat/GRID_LAT); i <= Math.floor(ne.lat/GRID_LAT); i++)
-    for (let j = Math.floor(sw.lng/GRID_LNG); j <= Math.floor(ne.lng/GRID_LNG); j++)
-      if (inDistrict((i+.5)*GRID_LAT, (j+.5)*GRID_LNG)) districtCells.add(i+':'+j);
-  if (window.__onDistrict) window.__onDistrict();
-  renderCoverage(); updateCovChip();
-}
-async function loadDistrict(force){
-  let geom = null;
-  if (!force) geom = lsGet(GEOKEY, null);
-  if (!geom && !force){ try { const r = await fetch('mirzo-ulugbek.geojson', {cache:'no-cache'}); if (r.ok) geom = pickGeom(await r.json()); } catch(e){} }
-  if (!geom){
-    for (const q of DQUERIES){
-      try {
-        const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, countrycodes:'uz', format:'geojson', polygon_geojson:'1', polygon_threshold:'0.00003', limit:'5', 'accept-language':'ru'}));
-        if (r.ok){ geom = pickGeom(await r.json()); if (geom) break; }
-      } catch(e){}
+function ensureDistrict(id, force){
+  if (!force && dcache[id]) return Promise.resolve(true);
+  if (dpend[id]) return dpend[id];
+  const def = DISTRICTS.find(d => d.id === id); if (!def) return Promise.resolve(false);
+  return dpend[id] = (async () => {
+    const key = 'geo-v2-' + id; let geom = force ? null : lsGet(key, null);
+    if (!geom && !force && id === DEFAULT_D) geom = lsGet('mirzo-ulugbek-geo-v1', null);
+    if (!geom && def.file){ try { const r = await fetch(def.file, {cache:'no-cache'}); if (r.ok) geom = pickGeom(await r.json()); } catch(e){} }
+    if (!geom){
+      for (const q of def.q){
+        try {
+          const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({q, countrycodes:'uz', format:'geojson', polygon_geojson:'1', polygon_threshold:'0.00003', limit:'5', 'accept-language':'ru'}));
+          if (r.ok){ geom = pickGeom(await r.json()); if (geom) break; }
+        } catch(e){}
+      }
     }
-  }
-  if (!geom){ if (force) toast('Не удалось загрузить границу района'); return false; }
-  lsSet(GEOKEY, geom);
-  const first = !districtLayer;
-  drawDistrict(geom);
-  if ((first && !cfg.view) || force) map.flyToBounds(districtBounds, {padding:[20,20], duration:.7});
-  return true;
+    if (geom){ dcache[id] = {geom}; lsSet(key, geom); }
+    return !!geom;
+  })().finally(() => { delete dpend[id]; });
 }
-window.MM_districtReady = loadDistrict();
+function currentDistrictIds(){
+  const s = new Set();
+  (me() ? visibleSellers() : []).forEach(u => (userOf(u).districts || []).forEach(d => DISTRICTS.some(x => x.id === d) && s.add(d)));
+  if (!s.size) s.add(DEFAULT_D);
+  return [...s];
+}
+let refPromise = null;
+function refreshDistricts(force){
+  const key = currentDistrictIds().join(',');
+  if (!force && key === shownKey) return Promise.resolve();
+  if (refPromise) return refPromise;
+  refPromise = drawDistricts(force).finally(() => { refPromise = null; if (currentDistrictIds().join(',') !== key) setTimeout(() => refreshDistricts(), 50); });
+  return refPromise;
+}
+async function drawDistricts(force){
+  const ids = currentDistrictIds(), key = ids.join(',');
+  {
+    await Promise.all(ids.map(id => ensureDistrict(id, force)));
+    const ok = ids.filter(id => dcache[id]); if (!ok.length){ shownKey = key; if (force) toast('Не удалось загрузить границу района'); return; }
+    if (districtLayer) map.removeLayer(districtLayer);
+    const outers = []; districtRings = [];
+    ok.forEach(id => polysOf(dcache[id].geom).forEach(pg => { outers.push(pg[0].map(([x, y]) => [y, x])); districtRings.push(pg[0]); }));
+    const world = [[85,-180],[85,180],[-85,180],[-85,-180]];
+    districtLayer = L.layerGroup([
+      L.polygon([world, ...outers], {pane:'district', stroke:false, fillColor:'#141626', fillOpacity:.16, interactive:false}),
+      L.polygon(outers, {pane:'district', color:'#fff', weight:7, opacity:.9, fill:false, interactive:false}),
+      L.polygon(outers, {pane:'district', color:'#7c6cff', weight:3.5, fill:true, fillColor:'#7c6cff', fillOpacity:.03, interactive:false})
+    ]);
+    districtBounds = L.latLngBounds(outers.flat());
+    if (cfg.district) districtLayer.addTo(map);
+    districtCells = new Set();
+    const sw = districtBounds.getSouthWest(), ne = districtBounds.getNorthEast();
+    for (let i = Math.floor(sw.lat/GRID_LAT); i <= Math.floor(ne.lat/GRID_LAT); i++)
+      for (let j = Math.floor(sw.lng/GRID_LNG); j <= Math.floor(ne.lng/GRID_LNG); j++)
+        if (inDistrict((i+.5)*GRID_LAT, (j+.5)*GRID_LNG)) districtCells.add(i+':'+j);
+    shownKey = key;
+    renderCoverage(); updateCovChip();
+    if (force || (!districtFlown && !cfg.view)){ districtFlown = true; map.flyToBounds(districtBounds, {padding:[20,20], duration:.7}); }
+  }
+}
+window.MM_districtReady = ensureDistrict(DEFAULT_D);
+const defaultBounds = () => dcache[DEFAULT_D] ? L.latLngBounds(polysOf(dcache[DEFAULT_D].geom).flatMap(pg => pg[0].map(([x, y]) => [y, x]))) : null;
+const inDefault = (a, b) => dcache[DEFAULT_D] ? polysOf(dcache[DEFAULT_D].geom).some(pg => inRing(a, b, pg[0])) : true;
 
 /* ================= данные ================= */
 const sellers = () => (session && session.team || []).filter(x => x.role === 'seller');
@@ -397,7 +436,7 @@ function visitOrder(u, k){
   return {vs, num};
 }
 let renderQueued = false;
-function render(){ renderRoutes(); renderPins(); renderNotes(); renderLive(); updateHeader(); renderPeople(); renderPeriods(); renderCoverage(); updateCovChip(); renderVisitBar(); renderShiftChip(); renderSide(); }
+function render(){ renderRoutes(); renderPins(); renderNotes(); renderLive(); updateHeader(); renderPeople(); renderPeriods(); renderCoverage(); updateCovChip(); renderVisitBar(); renderShiftChip(); renderSide(); refreshDistricts(); }
 function renderRoutes(){
   routeLayer.clearLayers();
   const days = rangeDays(), sd = singleDay();
@@ -765,6 +804,8 @@ function closeSheet(){
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
 }
 $('#backdrop').onclick = closeSheet;
+$('#sheetX').onclick = closeSheet;
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#sheet').classList.contains('open')) closeSheet(); });
 (() => { let y0 = null; const sh = $('#sheet');
   sh.addEventListener('touchstart', e => { if ($('#sheetBody').scrollTop <= 0 && !e.target.closest('input,textarea,select,.photos')) y0 = e.touches[0].clientY; }, {passive:true});
   sh.addEventListener('touchmove', e => { if (y0 === null) return; const dy = e.touches[0].clientY - y0; if (dy > 0) sh.style.transform = `translateY(${dy}px)`; }, {passive:true});
@@ -1318,7 +1359,7 @@ function sellerCard(s){
   return `<div class="mcard${focus===s.u?' sel':''}" data-u="${esc(s.u)}" style="--c:${s.color}">
     <div class="mhead"><span class="av ${st.k}">${esc(initials(s.name))}</span><div class="mname"><b>${esc(s.name)}</b><small class="st-${st.k}">${st.icon} ${esc(st.text)}</small></div></div>
     <div class="mstats"><span><b>${r.visits}</b> визитов</span><span><b>${r.created}</b> новых</span><span><b>${r.connected}</b> подкл.</span><span><b>${fmtKm(r.km)}</b></span></div>
-    <div class="mact"><button data-act="show">На карте</button><button data-act="day">День</button><button data-act="msg">${svg('note', 14)} Написать</button></div>
+    <div class="mact"><button data-act="show">На карте</button><button data-act="day">Хронология</button><button data-act="msg">${svg('note', 14)} Написать</button></div>
   </div>`;
 }
 function teamHtml(){
@@ -1350,7 +1391,7 @@ let sideTab = 'team';
 function renderSide(){
   const side = $('#side');
   if (!isLead() || !document.body.classList.contains('wide')){ side.innerHTML = ''; return; }
-  side.innerHTML = `<div class="side-head"><div class="auth-logo" style="margin:0"><img src="icon-180.png" alt=""><div><b>Mercury Map</b><small>Пульт руководителя · ${fmtHM(Date.now())}</small></div></div></div>
+  side.innerHTML = `<div class="side-head"><div class="auth-logo" style="margin:0"><img src="icon-180.png" alt=""><div><b>Mercury Map</b><small>Пульт руководителя · ${fmtHM(Date.now())}</small></div></div><button class="side-x" data-sidetoggle title="Свернуть панель" aria-label="Свернуть панель"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button></div>
     <div class="seg" style="margin:0 14px"><button data-st="team" class="${sideTab==='team'?'sel':''}">Команда</button><button data-st="feed" class="${sideTab==='feed'?'sel':''}">Лента событий${events.length ? ' · ' + events.filter(e => EVT[e.type]).length : ''}</button></div>
     <div class="side-body">${sideTab === 'team' ? teamHtml() : `<div class="feed">${feedHtml()}</div>`}</div>`;
   side.querySelectorAll('[data-st]').forEach(x => x.onclick = () => { sideTab = x.dataset.st; renderSide(); });
@@ -1372,17 +1413,31 @@ function openTeam(){
 }
 function manageHtml(){
   const team = session.team || [];
-  return `<div class="list">${team.map(t => `<div class="item"><span class="dot" style="--c:${t.color}"></span><span class="t"><b>${esc(t.name)}</b><small>${t.role === 'lead' ? 'Руководитель' : 'Менеджер'} · @${esc(t.u)}</small></span></div>`).join('')}</div>
-    <h3>Добавить в команду</h3>${registerFields('t')}
+  return `<div class="list">${team.map(t => `<div class="item"><span class="dot" style="--c:${t.color}"></span><span class="t"><b>${esc(t.name)}</b><small>${t.role === 'lead' ? 'Руководитель' : 'Менеджер · ' + esc(distNames(t.districts))} · @${esc(t.u)}</small></span>${t.role === 'seller' ? `<button class="mini" data-dedit="${esc(t.u)}">Район</button>` : ''}</div>`).join('')}</div>
+    <h3>Добавить менеджера</h3>${registerFields('t', false, true)}
     <div class="err" id="tErr" style="color:#ff7584;font-size:13px;min-height:18px;margin-top:8px"></div>
-    <div class="row" style="margin-top:6px"><button class="btn primary" id="tAdd">Создать аккаунт</button></div>`;
+    <div class="row" style="margin-top:6px"><button class="btn primary" id="tAdd">Создать менеджера</button></div>`;
 }
 function mountManage(b){
   mountRegister(b, 't');
+  b.querySelectorAll('[data-dedit]').forEach(x => x.onclick = () => openDistrictEdit(x.dataset.dedit));
   b.querySelector('#tAdd').onclick = async () => {
-    try { await api('api/auth', {method:'POST', body:readRegister(b, 't')}); await refreshMe(); toast('Аккаунт создан — передайте логин и пароль'); openTeam(); }
+    try { await api('api/auth', {method:'POST', body:readRegister(b, 't')}); await refreshMe(); toast('Менеджер создан — передайте ему логин и пароль'); openTeam(); }
     catch(e){ b.querySelector('#tErr').textContent = e.message; }
   };
+}
+function openDistrictEdit(u){
+  const t = userOf(u), cur = (t.districts && t.districts.length) ? t.districts : [DEFAULT_D];
+  openSheet(`<h2>Район · ${esc(t.name)}</h2><div class="sub">Менеджеру можно назначить один или несколько районов. Граница и процент покрытия считаются по ним.</div>
+    <div class="field">${distChips(cur)}</div>
+    <div class="row"><button class="btn" id="dBack">Назад</button><button class="btn primary" id="dSave">Сохранить</button></div>`, b => {
+    mountMulti(b);
+    b.querySelector('#dBack').onclick = openTeam;
+    b.querySelector('#dSave').onclick = async () => {
+      try { await api('api/auth', {method:'POST', body:{action:'setDistricts', u, districts:readDists(b)}}); await refreshMe(); shownKey = ''; render(); closeSheet(); toast('Район сохранён'); }
+      catch(e){ toast(e.message); }
+    };
+  });
 }
 function openSeller(u){
   const s = userOf(u), p = live[u], r = dayStats(u, today()), st = sellerState(u);
@@ -1419,7 +1474,7 @@ function openSettings(){
     <div class="row" style="margin-top:0"><button class="btn sm" id="pushOn">Включить уведомления</button><button class="btn sm" id="pushTest">Проверить</button></div>
     <h3>Стиль карты</h3>
     <div class="styles">${Object.keys(STYLES).map(k => `<button class="style${cfg.style===k?' sel':''}" data-s="${k}"><img loading="lazy" alt="" src="${PREVIEW(k)}">${STYLES[k].name}</button>`).join('')}</div>
-    <h3>Мирзо-Улугбекский район</h3>
+    <h3>Район: ${esc(distNames(currentDistrictIds()))}</h3>
     <div class="seg"><button data-dz="1" class="${cfg.district?'sel':''}">Показывать границу</button><button data-dz="0" class="${cfg.district?'':'sel'}">Скрыть</button></div>
     <div class="row" style="margin-top:10px"><button class="btn sm" id="dzFit">Показать район</button><button class="btn sm" id="dzReload">Обновить границу</button></div>
   `, b => {
@@ -1433,8 +1488,8 @@ function openSettings(){
       if (districtLayer){ if (cfg.district) districtLayer.addTo(map); else map.removeLayer(districtLayer); }
       b.querySelectorAll('[data-dz]').forEach(y => y.classList.toggle('sel', y === x));
     });
-    b.querySelector('#dzFit').onclick = async () => { if (!districtBounds && !(await loadDistrict())) return toast('Граница ещё не загружена'); closeSheet(); map.flyToBounds(districtBounds, {padding:[20,20], duration:.7}); };
-    b.querySelector('#dzReload').onclick = async () => { toast('Загружаю границу…'); if (await loadDistrict(true)){ closeSheet(); toast('Граница обновлена'); } };
+    b.querySelector('#dzFit').onclick = () => { if (!districtBounds) return toast('Граница ещё не загружена'); closeSheet(); map.flyToBounds(districtBounds, {padding:[20,20], duration:.7}); };
+    b.querySelector('#dzReload').onclick = async () => { toast('Загружаю границу…'); await refreshDistricts(true); closeSheet(); };
   });
 }
 $('#layersBtn').onclick = openSettings;
@@ -1503,23 +1558,30 @@ async function enablePush(){
 }
 
 /* ================= вход ================= */
-function registerFields(p, first){
+const distChips = (sel) => `<div class="chips" data-multi>${DISTRICTS.map(d => `<button type="button" class="chipbtn${sel.includes(d.id)?' sel':''}" data-dist="${d.id}">${d.name}</button>`).join('')}</div>`;
+function registerFields(p, first, inapp){
   return `
-    ${first ? '' : `<div class="field"><label>Код администратора (APP_PIN из Vercel)</label><input id="${p}Code" type="password" inputmode="numeric" placeholder="Код"></div>`}
+    ${first || inapp ? '' : `<div class="field"><label>Код администратора (APP_PIN из Vercel)</label><input id="${p}Code" type="password" inputmode="numeric" placeholder="Код"></div>`}
     <div class="field"><label>Имя и фамилия</label><input id="${p}Name" maxlength="40" placeholder="Имя Фамилия"></div>
     <div class="field"><label>Логин (латиницей)</label><input id="${p}U" maxlength="24" autocapitalize="none" autocomplete="off" placeholder="например, aziz"></div>
     <div class="field"><label>Пароль (от 6 символов)</label><input id="${p}Pass" type="password" autocomplete="new-password"></div>
-    <div class="field"><label>Роль</label><div class="seg" style="margin-top:0"><button type="button" data-role="seller" class="sel">Менеджер</button><button type="button" data-role="lead">Руководитель</button></div></div>
+    ${inapp ? '' : '<div class="field"><label>Роль</label><div class="seg" style="margin-top:0"><button type="button" data-role="seller" class="sel">Менеджер</button><button type="button" data-role="lead">Руководитель</button></div></div>'}
+    ${first ? '' : `<div class="field"><label>Район менеджера <small>(можно выбрать несколько)</small></label>${distChips([DEFAULT_D])}</div>`}
     <div class="field"><label>Цвет на карте</label><div class="colors">${USER_COLORS.map((c,i) => `<button type="button" data-col="${c}" style="--c:${c}" class="${i===0?'sel':''}"></button>`).join('')}</div></div>`;
 }
 function mountRegister(b){
   b.querySelectorAll('[data-role]').forEach(x => x.onclick = () => b.querySelectorAll('[data-role]').forEach(y => y.classList.toggle('sel', y === x)));
   b.querySelectorAll('[data-col]').forEach(x => x.onclick = () => b.querySelectorAll('[data-col]').forEach(y => y.classList.toggle('sel', y === x)));
+  mountMulti(b);
 }
+function mountMulti(b){
+  b.querySelectorAll('[data-multi] [data-dist]').forEach(x => x.onclick = () => { const on = b.querySelectorAll('[data-multi] [data-dist].sel'); if (x.classList.contains('sel') && on.length === 1) return toast('Нужен хотя бы один район'); x.classList.toggle('sel'); });
+}
+const readDists = b => [...b.querySelectorAll('[data-multi] [data-dist].sel')].map(x => x.dataset.dist);
 function readRegister(b, p){
   const v = id => { const e = b.querySelector('#' + p + id); return e ? e.value.trim() : ''; };
   return {action:'register', adminCode:v('Code'), name:v('Name'), u:v('U').toLowerCase(), pass:b.querySelector('#'+p+'Pass').value,
-    role:(b.querySelector('[data-role].sel')||{}).dataset.role || 'seller', color:(b.querySelector('[data-col].sel')||{}).dataset.col};
+    role:(b.querySelector('[data-role].sel')||{dataset:{}}).dataset.role || 'seller', color:(b.querySelector('[data-col].sel')||{dataset:{}}).dataset.col, districts:readDists(b)};
 }
 async function showAuth(view){
   const box = $('#authCard'); $('#auth').classList.add('show');
@@ -1608,8 +1670,10 @@ function logout(expired){
 /* ================= запуск ================= */
 let started = false, pollTimer = null;
 const wideMq = matchMedia('(min-width: 1024px)');
-function applyWide(){ document.body.classList.toggle('wide', wideMq.matches && isLead()); setTimeout(() => map.invalidateSize(), 50); renderSide(); }
+function applyWide(){ document.body.classList.toggle('wide', wideMq.matches && isLead()); document.body.classList.toggle('side-off', !!cfg.sideOff); setTimeout(() => map.invalidateSize(), 50); renderSide(); }
 wideMq.addEventListener && wideMq.addEventListener('change', applyWide);
+function toggleSide(){ cfg.sideOff = !cfg.sideOff; saveCfg(); applyWide(); setTimeout(() => map.invalidateSize(), 120); }
+document.addEventListener('click', e => { if (e.target.closest('[data-sidetoggle]') || e.target.closest('#sideOpen')) toggleSide(); });
 async function start(){
   if (started) return; started = true;
   document.body.classList.add(isLead() ? 'lead' : 'seller');
@@ -1631,6 +1695,7 @@ async function start(){
     if (DEMO){ DKEY = '__demo'; const j = await api('api/data'); applyRemote(j); DKEY = null; } else { store.save(); syncNow(); }
   }
   render();
+  await refreshDistricts();
   loadFeed(); loadCoverage();
   if (isLead()) await loadTeamData();
   ensureTracks(true).then(() => { render(); if (isLead() && !cfg.view) locateMe(); });
@@ -1654,7 +1719,7 @@ async function tick(){
       gpsTick();
       if (buf.length && tickN % 2 === 0) flushTrack();
       if (j.ver !== feedVer) loadFeed();
-      if (tickN % 20 === 0){ ensureTracks(true).then(() => { if (singleDay() === today()) render(); }); loadCoverage(); }
+      if (tickN % 20 === 0){ ensureTracks(true).then(() => { if (singleDay() === today()) render(); }); loadCoverage(); refreshMe().then(() => refreshDistricts()).catch(() => {}); }
       if (tickN % 4 === 0) syncNow();
       renderShiftChip();
     } else {
@@ -1692,7 +1757,7 @@ window.addEventListener('pagehide', () => { if (isSeller() && buf.length) flushT
 
 if ('serviceWorker' in navigator && location.protocol === 'https:' && !DEMO) navigator.serviceWorker.register('sw.js').catch(()=>{});
 if (DEMO){
-  DEMO.boot({map, inDistrict: (a, b) => districtRings.length ? inDistrict(a, b) : true, districtReady: window.MM_districtReady, getBounds: () => districtBounds}).then(s => { session = s; $('#demoBar').classList.add('show'); start(); });
+  DEMO.boot({map, inDistrict: inDefault, districtReady: window.MM_districtReady, getBounds: defaultBounds}).then(s => { session = s; $('#demoBar').classList.add('show'); start(); });
 } else if (session && session.token){
   refreshMe().then(start).catch(e => { if (!session) return; if (session.team) start(); else showAuth(); });
 } else showAuth();

@@ -66,7 +66,7 @@ function readToken(t) {
 /* ---------- пользователи ---------- */
 async function getUser(u) { const j = await redis('HGET', P + 'users', u); return j ? JSON.parse(j) : null; }
 async function allUsers() { const o = hashToObj(await redis('HGETALL', P + 'users')); return Object.values(o).map(s => JSON.parse(s)); }
-const pub = u => ({ u: u.u, name: u.name, role: u.role, color: u.color });
+const pub = u => ({ u: u.u, name: u.name, role: u.role, color: u.color, districts: u.districts || [] });
 
 /* ---------- http ---------- */
 function send(res, code, obj) { res.setHeader('Cache-Control', 'no-store'); res.status(code).json(obj); }

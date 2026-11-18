@@ -243,7 +243,8 @@ async function api(path, {method = 'GET', body} = {}){
   switch (p){
     case 'api/auth': {
       if (qs.get('action') === 'me' || (body && body.action === 'me')) return ok({user:pubUser(me()), trackToken:'demo-token', team:team(), shift:S.shifts[me().u] || null, work:[7, 21], vapid:null});
-      if (body && body.action === 'register') return {ok:true};
+      if (body && body.action === 'register'){ if (S.extra.length + TEAM.length >= 10) return {ok:true}; S.extra.push({u:body.u, name:body.name || body.u, color:body.color || '#7c6cff', role:'seller', districts:body.districts && body.districts.length ? body.districts : ['mirzo-ulugbek']}); return {ok:true}; }
+      if (body && body.action === 'setDistricts'){ const t = TEAM.concat(S.extra).find(x => x.u === body.u); if (t) t.districts = body.districts; return {ok:true}; }
       if (body && body.action === 'newTrackToken') return {trackToken:'demo-' + Math.random().toString(36).slice(2, 8)};
       return {ok:true};
     }
@@ -301,8 +302,9 @@ async function api(path, {method = 'GET', body} = {}){
   }
   return {ok:true};
 }
-const pubUser = u => ({u:u.u, name:u.name, role:u.role, color:u.color});
-const team = () => [pubUser(LEAD)].concat(TEAM.map(pubUser));
+const pubUser = u => ({u:u.u, name:u.name, role:u.role, color:u.color, districts:u.districts || (u.role === 'seller' ? ['mirzo-ulugbek'] : [])});
+S.extra = [];
+const team = () => [pubUser(LEAD)].concat(TEAM.map(pubUser), S.extra.map(pubUser));
 
 // фасады и залы партнёров — простые иллюстрации (без внешних картинок)
 function photoUrl(id){

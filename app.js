@@ -1391,7 +1391,7 @@ let sideTab = 'team';
 function renderSide(){
   const side = $('#side');
   if (!isLead() || !document.body.classList.contains('wide')){ side.innerHTML = ''; return; }
-  side.innerHTML = `<div class="side-head"><div class="auth-logo" style="margin:0"><img src="icon-180.png" alt=""><div><b>Mercury Map</b><small>Пульт руководителя · ${fmtHM(Date.now())}</small></div></div><button class="side-x" data-sidetoggle title="Свернуть панель" aria-label="Свернуть панель"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button></div>
+  side.innerHTML = `<div class="side-head"><div class="auth-logo" style="margin:0"><img src="icon-180.png" alt=""><div><b>Mercury Map</b><small>Пульт руководителя · ${fmtHM(Date.now())}</small></div></div><button class="side-x" data-sidetoggle title="Закрыть панель" aria-label="Закрыть панель"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div class="seg" style="margin:0 14px"><button data-st="team" class="${sideTab==='team'?'sel':''}">Команда</button><button data-st="feed" class="${sideTab==='feed'?'sel':''}">Лента событий${events.length ? ' · ' + events.filter(e => EVT[e.type]).length : ''}</button></div>
     <div class="side-body">${sideTab === 'team' ? teamHtml() : `<div class="feed">${feedHtml()}</div>`}</div>`;
   side.querySelectorAll('[data-st]').forEach(x => x.onclick = () => { sideTab = x.dataset.st; renderSide(); });

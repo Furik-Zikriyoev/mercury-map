@@ -5,8 +5,9 @@ const RURL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL 
 const RTOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const P = 'mm:';
 const TZ_OFF = 5 * 3600e3; // Ташкент, UTC+5, без перехода на летнее время
-const WORK_START = +(process.env.WORK_START || 9);
-const WORK_END = +(process.env.WORK_END || 18);
+// Рабочее окно-предохранитель: даже при открытом дне точки вне него не пишутся
+const WORK_START = +(process.env.WORK_START || 7);
+const WORK_END = +(process.env.WORK_END || 21);
 
 /* ---------- Redis (Upstash REST) ---------- */
 async function redis(...cmd) {
@@ -99,7 +100,7 @@ function merge(a, b) {
     }
     return [...m.values()].filter(x => !(deleted[x.id] && deleted[x.id] >= ver(x)));
   };
-  return { strokes: pick(a.strokes, b.strokes), partners: pick(a.partners, b.partners), deleted, saved: Date.now() };
+  return { strokes: pick(a.strokes, b.strokes), partners: pick(a.partners, b.partners), visits: pick(a.visits, b.visits), deleted, saved: Date.now() };
 }
 
 /* ---------- GPS-трек ---------- */
@@ -119,12 +120,46 @@ function distM(a, b) {
 }
 function trackKm(pts) { let d = 0; for (let i = 1; i < pts.length; i++) if (pts[i][2] - pts[i - 1][2] < 10 * 60e3) d += distM(pts[i - 1], pts[i]); return d; }
 // Сохраняет точки трека (только в рабочее время) и обновляет «где сейчас»
+/* ---------- рабочий день (смена) ---------- */
+// mm:shift:<u> = {day, start, end}. GPS пишется только между «Начать день» и «Завершить день».
+async function getShift(u) { const raw = await redis('GET', `${P}shift:${u}`); return raw ? JSON.parse(raw) : null; }
+function shiftOpen(sh, ms) {
+  if (!sh || !sh.start || sh.day !== dayOf(ms)) return false;
+  return ms >= sh.start - 60e3 && (!sh.end || ms <= sh.end) && inWork(ms);
+}
+
+/* ---------- покрытие района: сетка ~100 м ---------- */
+const GRID_LAT = 0.0009, GRID_LNG = 0.0012;
+const cellOf = (lat, lng) => Math.floor(lat / GRID_LAT) + ':' + Math.floor(lng / GRID_LNG);
+function cellsOf(pts) {
+  const s = new Set();
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]; s.add(cellOf(p[0], p[1]));
+    const q = pts[i - 1];
+    if (q && Math.abs(p[2] - q[2]) < 10 * 60e3) {
+      const n = Math.min(40, Math.ceil(distM(q, p) / 40));
+      for (let k = 1; k < n; k++) s.add(cellOf(q[0] + (p[0] - q[0]) * k / n, q[1] + (p[1] - q[1]) * k / n));
+    }
+  }
+  return [...s];
+}
+
+/* ---------- лента событий для руководителя ---------- */
+async function addEvents(list) {
+  if (!list.length) return;
+  const d = dayOf(Date.now());
+  await pipe([['RPUSH', `${P}events:${d}`, ...list.map(e => JSON.stringify({ ts: Date.now(), ...e }))], ['EXPIRE', `${P}events:${d}`, 8 * 86400]]);
+}
+
+// Сохраняет точки трека (только внутри открытого рабочего дня), обновляет «где сейчас» и покрытие
 async function storeTrack(u, points, extra = {}, maxAcc = 80) {
-  const good = (points || []).filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]) && inWork(p[2]) && (p[3] || 0) <= maxAcc);
+  const sh = await getShift(u);
+  const good = (points || []).filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]) && (p[3] || 0) <= maxAcc && shiftOpen(sh, p[2]));
   if (!good.length) return 0;
+  good.sort((a, b) => a[2] - b[2]);
   const byDay = {};
   for (const p of good) (byDay[dayOf(p[2])] = byDay[dayOf(p[2])] || []).push(encPt(p));
-  const last = good.reduce((a, b) => (b[2] > a[2] ? b : a));
+  const last = good[good.length - 1];
   const cmds = [];
   for (const [d, list] of Object.entries(byDay)) {
     cmds.push(['RPUSH', `${P}track:${u}:${d}`, ...list]);
@@ -132,6 +167,7 @@ async function storeTrack(u, points, extra = {}, maxAcc = 80) {
   }
   const live = { lat: last[0], lng: last[1], ts: last[2], acc: last[3] || 0, ...extra };
   cmds.push(['SET', `${P}live:${u}`, JSON.stringify(live), 'EX', 86400]);
+  cmds.push(['SADD', `${P}cov:${u}`, ...cellsOf(good)]);
   await pipe(cmds);
   return good.length;
 }
@@ -160,5 +196,5 @@ async function pushTo(usernames, payload) {
   }
 }
 
-module.exports = { P, redis, pipe, hashToObj, dayOf, inWork, WORK_START, WORK_END, hashPass, checkPass, makeToken, readToken,
+module.exports = { getShift, shiftOpen, cellsOf, cellOf, addEvents, GRID_LAT, GRID_LNG, P, redis, pipe, hashToObj, dayOf, inWork, WORK_START, WORK_END, hashPass, checkPass, makeToken, readToken,
   getUser, allUsers, pub, send, body, fail, session, wrap, merge, decPt, cleanTrack, trackKm, distM, storeTrack, pushTo, wp };

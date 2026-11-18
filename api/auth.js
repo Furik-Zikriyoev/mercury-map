@@ -36,6 +36,23 @@ module.exports = L.wrap(async (req, res) => {
     return L.send(res, 200, { ok: true, user: L.pub(user) });
   }
 
+  if (action === 'resetPassword') {
+    // сброс забытого пароля по коду администратора
+    if (!process.env.APP_PIN || String(b.adminCode || '') !== process.env.APP_PIN) L.fail(403, 'Неверный код администратора');
+    const user = await L.getUser(String(b.u || '').trim().toLowerCase());
+    if (!user) L.fail(404, 'Нет такого логина');
+    if (String(b.pass || '').length < 6) L.fail(400, 'Пароль — минимум 6 символов');
+    user.pass = L.hashPass(b.pass);
+    await L.redis('HSET', L.P + 'users', user.u, JSON.stringify(user));
+    return L.send(res, 200, { ok: true });
+  }
+
+  if (action === 'logins') {
+    // список логинов (без паролей) — чтобы вспомнить свой; только с кодом администратора
+    if (!process.env.APP_PIN || String(b.adminCode || '') !== process.env.APP_PIN) L.fail(403, 'Неверный код администратора');
+    return L.send(res, 200, { users: (await L.allUsers()).map(L.pub) });
+  }
+
   // дальше — только для вошедших
   const s = L.session(req);
   const me = await L.getUser(s.u);
@@ -43,7 +60,8 @@ module.exports = L.wrap(async (req, res) => {
 
   if (action === 'me') {
     const team = (await L.allUsers()).map(L.pub);
-    return L.send(res, 200, { user: L.pub(me), trackToken: me.trackToken, team, work: [L.WORK_START, L.WORK_END],
+    const shift = me.role === 'seller' ? await L.getShift(me.u) : null;
+    return L.send(res, 200, { user: L.pub(me), trackToken: me.trackToken, team, shift, work: [L.WORK_START, L.WORK_END],
       vapid: process.env.VAPID_PUBLIC_KEY || null });
   }
 

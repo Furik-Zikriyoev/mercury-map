@@ -1,5 +1,5 @@
-const SHELL = 'mm-shell-v7', TILES = 'route-tiles-v2';
-const ASSETS = ['./', './index.html', './app.js', './app.css', './manifest.webmanifest', './icon-180.png', './icon-512.png', './leaflet.css', './leaflet.js'];
+const SHELL = 'mm-shell-v8', TILES = 'route-tiles-v2';
+const ASSETS = ['./', './index.html', './app.js', './demo.js', './app.css', './manifest.webmanifest', './icon-180.png', './icon-512.png', './leaflet.css', './leaflet.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => Promise.all(ASSETS.map(a => c.add(a).catch(() => {})))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== SHELL && k !== TILES).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 const isTile = u => /tile\.openstreetmap\.org|arcgisonline\.com/.test(u.hostname);

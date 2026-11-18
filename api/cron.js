@@ -22,7 +22,8 @@ module.exports = L.wrap(async (req, res) => {
     const connected = (data.partners || []).filter(p => (p.history || []).some(h => h.s === 'connected' && L.dayOf(h.ts) === day)).length;
     const km = fmtKm(L.trackKm(pts));
     const time = pts.length ? `${hm(pts[0][2])}–${hm(pts[pts.length - 1][2])}` : 'нет трека';
-    const text = `${km} · ${time} · новых ${created.length}, обновлено ${changed.length}, подключено ${connected}`;
+    const visits = (data.visits || []).filter(v => L.dayOf(v.start) === day).length;
+    const text = `${km} · ${time} · визитов ${visits}, новых ${created.length}, подключено ${connected}`;
     lines.push(`${x.name}: ${text}`);
     await L.pushTo([x.u], { title: 'Отчёт за день', body: text, tag: 'report-' + day, url: '/?report=' + day });
   }

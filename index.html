@@ -30,9 +30,15 @@
   <button class="iconbtn glass" id="layersBtn" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg><span class="sync" id="syncDot"></span></button>
 </div>
 
-<div class="scopebar glass"><button id="scDay" class="sel">День</button><button id="scAll">Вся история</button></div>
-<button class="rec glass" id="recChip"><i></i><span id="recText">Запись</span></button>
+<div class="periods glass" id="periods"></div>
+<button class="shift glass start" id="shiftChip" style="display:none"></button>
+<button class="covchip glass" id="covChip"></button>
+<button class="iconbtn glass filterbtn" id="filterBtn" aria-label="Фильтры"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg></button>
 <div class="people" id="people"></div>
+<div class="visitbar glass" id="visitBar"></div>
+<div class="toasts" id="toasts"></div>
+<aside class="side glass" id="side"></aside>
+<div class="demobar" id="demoBar"><span>✨ ДЕМО · данные вымышленные</span><button id="demoExit">Выйти из демо</button></div>
 <div class="eraser-ring" id="ring"></div>
 <div class="palette glass" id="palette"></div>
 
@@ -46,6 +52,7 @@
 
 <script src="leaflet.js"></script>
 <script>window.L||(document.write('<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>'))</script>
+<script src="demo.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

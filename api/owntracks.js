@@ -21,6 +21,6 @@ module.exports = L.wrap(async (req, res) => {
   const types = msgs.map(m => (m && m._type) || '?').join(',');
   if (user.role !== 'seller') { console.log(`[owntracks] ${u}: не сейлер — точки не пишем`); return L.send(res, 200, []); }
   const saved = pts.length ? await L.storeTrack(user.u, pts, { batt, src: 'owntracks' }, 150) : 0;
-  console.log(`[owntracks] ${u}: сообщений ${msgs.length} (${types}), точек ${pts.length}, сохранено ${saved}` + (pts.length && !saved ? ` — отброшено: точность ${pts.map(p => Math.round(p[3]) + 'м').join(',')} или вне рабочего времени` : ''));
+  console.log(`[owntracks] ${u}: сообщений ${msgs.length} (${types}), точек ${pts.length}, сохранено ${saved}` + (pts.length && !saved ? ` — отброшено: точность ${pts.map(p => Math.round(p[3]) + 'м').join(',')} или рабочий день не начат / уже завершён` : ''));
   L.send(res, 200, []);
 });

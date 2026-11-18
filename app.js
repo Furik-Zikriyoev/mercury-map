@@ -332,7 +332,6 @@ function coveredCells(){
   for (const u of visibleSellers()){
     (cov[u] || []).forEach(c => set.add(c));
     trackOf(u, today()).length && addCellsFromLine(set, trackOf(u, today()));
-    dataOf(u).strokes.forEach(s => addCellsFromLine(set, s.pts));
     dataOf(u).partners.forEach(p => set.add(cellOf(p.lat, p.lng)));
   }
   return set;
@@ -522,7 +521,7 @@ function focusSeller(u, fly = true){
 function buildDock(){
   const tools = isLead()
     ? [['hand','Карта'],['note','Заметка'],['|'],['#teamBtn','team','Команда'],['#reportBtn','report','Отчёт'],['#locateBtn','me','Где все']]
-    : [['hand','Карта'],['#newBtn','plus','Партнёр'],['#visitBtn','visit','Визит'],['pen','Рисовать'],['|'],['#reportBtn','report','Отчёт'],['#locateBtn','me','Я']];
+    : [['hand','Карта'],['#newBtn','plus','Партнёр'],['#visitBtn','visit','Визит'],['|'],['#reportBtn','report','Отчёт'],['#locateBtn','me','Я']];
   $('#dock').innerHTML = tools.map(t => t[0] === '|' ? '<div class="sep"></div>'
     : t[0][0] === '#' ? `<button class="tool${t[0]==='#newBtn'?' t-new':''}" id="${t[0].slice(1)}">${svg(t[1])}<span>${t[2]}</span></button>`
     : `<button class="tool t-${t[0]}${t[0]===mode?' active':''}" data-mode="${t[0]}">${svg(t[0])}<span>${t[1]}</span></button>`).join('');
